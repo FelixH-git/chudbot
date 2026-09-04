@@ -78,6 +78,36 @@ def on_mouse(event, x, y, flags, param):
             _click_pos = (x, y)
 
 
+def draw_axis_arrow(img, p_start, p_end, color, label, center=None):
+    """Draw an arrowed line and place its label off the line, away from `center`."""
+    start = (int(p_start[0]), int(p_start[1]))
+    end = (int(p_end[0]), int(p_end[1]))
+    cv2.arrowedLine(img, start, end, color, 3, tipLength=0.15)
+
+    # Place the label slightly beside the line, on the side facing away from the marker
+    mid = (p_start + p_end) / 2.0
+    vec = p_end - p_start
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        perp = np.array([-vec[1], vec[0]]) / norm
+        if center is not None and np.dot(perp, mid - center) < 0:
+            perp = -perp
+    else:
+        perp = np.array([0.0, -1.0])
+
+    label_pos = mid + perp * 22
+    cv2.putText(
+        img,
+        label,
+        (int(label_pos[0]), int(label_pos[1])),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
+
+
 # Converter to turn raw Bayer sensor data into a color BGR array
 converter = pylon.ImageFormatConverter()
 converter.OutputPixelFormat = pylon.PixelType_BGR8packed
@@ -137,6 +167,13 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         
                         # Draw the marker reference (corner) point
                         cv2.circle(filtered_img, aruco_ref_int, 5, (255, 0, 0), -1)
+
+                        # X/Y direction arrows along the marker sides (X = red, Y = green).
+                        # Corner order is [top-left, top-right, bottom-right, bottom-left].
+                        marker_pts = scaled_corners[0][0]
+                        marker_center = np.mean(marker_pts, axis=0)
+                        draw_axis_arrow(filtered_img, marker_pts[0], marker_pts[1], (0, 0, 255), "X", marker_center)
+                        draw_axis_arrow(filtered_img, marker_pts[0], marker_pts[3], (0, 255, 0), "Y", marker_center)
 
                         # Find contours of colored objects separated by black background
                         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
