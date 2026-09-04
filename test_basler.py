@@ -311,7 +311,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                 _pending = {
                                     "payload": (
                                         f"{shape_key(chosen['shape'])},"
-                                        f"{chosen['x_mm']:.2f},{chosen['y_mm']:.2f}"
+                                        f"{chosen['y_mm']:.2f},{chosen['x_mm']:.2f}"
                                     ),
                                     "bbox": chosen["bbox"],
                                 }
