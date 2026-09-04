@@ -1,6 +1,10 @@
+import threading
+
 import cv2
 import numpy as np
 from pypylon import pylon
+
+from Socka import RobotLink
 
 aruco_length = 100  # mm
 
@@ -42,6 +46,38 @@ def detect_shape(cnt):
         return "Circle"
     return f"Polygon({vertices})"
 
+
+# ---- Map detected shape names to the robot's known target keys ----
+def shape_key(shape_name):
+    mapping = {
+        "Circle": "pcircle",
+        "Square": "psquare",
+        "Rectangle": "prectangle",
+        "Hexagon": "phexa",
+        "Star": "pstar",
+        "Triangle": "ptriangle",
+    }
+    return mapping.get(shape_name, shape_name.lower())
+
+
+# ---- Socket link to the ABB robot (PC = server, robot connects) ----
+robot_link = RobotLink()
+threading.Thread(target=robot_link.start, daemon=True).start()
+
+# ---- Click-to-select state (point clicked in the resized frame) ----
+_click_lock = threading.Lock()
+_click_pos = None          # (x, y) just clicked, waiting to be processed
+_pending = None            # chosen object {'payload', 'bbox'}, waiting to be sent
+_last_sent = None          # last payload successfully sent to the robot
+
+
+def on_mouse(event, x, y, flags, param):
+    global _click_pos
+    if event == cv2.EVENT_LBUTTONDOWN:
+        with _click_lock:
+            _click_pos = (x, y)
+
+
 # Converter to turn raw Bayer sensor data into a color BGR array
 converter = pylon.ImageFormatConverter()
 converter.OutputPixelFormat = pylon.PixelType_BGR8packed
@@ -51,6 +87,10 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
     print("Using device:", camera.DeviceInfo.ModelName)
 
     camera.Width.TrySetToMaximum()
+
+    cv2.namedWindow("Basler Camera Feed")
+    cv2.setMouseCallback("Basler Camera Feed", on_mouse)
+
     camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
     while camera.IsGrabbing():
@@ -102,6 +142,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
                         object_id = 0  # Running ID for each detected color region
+                        detected_objects = []
                         for cnt in contours:
                             # Filter out small noise areas
                             if cv2.contourArea(cnt) > 300:
@@ -123,6 +164,20 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                     dx_mm = dx_px / pixel_cm_ratio
                                     dy_mm = dy_px / pixel_cm_ratio
                                     total_dist_mm = np.sqrt(dx_mm**2 + dy_mm**2)
+
+                                    # Record this object so a click can select & send it
+                                    bx, by, bw, bh = cv2.boundingRect(cnt)
+                                    detected_objects.append(
+                                        {
+                                            "id": object_id,
+                                            "cx": obj_cx,
+                                            "cy": obj_cy,
+                                            "bbox": (bx, by, bw, bh),
+                                            "dx_mm": dx_mm,
+                                            "dy_mm": dy_mm,
+                                            "shape": shape,
+                                        }
+                                    )
 
                                     # Draw line from the ArUco corner to the object center
                                     cv2.line(filtered_img, aruco_ref_int, (obj_cx, obj_cy), (255, 255, 0), 2)
@@ -180,6 +235,67 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                         cv2.LINE_AA,
                                     )
 
+                        # ---- Click-to-select: choose an object and send its X/Y to the robot ----
+                        with _click_lock:
+                            click = _click_pos
+                            _click_pos = None
+
+                        if click is not None and detected_objects:
+                            # Prefer the object whose bounding box contains the click
+                            chosen = None
+                            for obj in detected_objects:
+                                bx, by, bw, bh = obj["bbox"]
+                                if bx <= click[0] <= bx + bw and by <= click[1] <= by + bh:
+                                    chosen = obj
+                                    break
+                            # Otherwise pick the object with the nearest center (within 50 px)
+                            if chosen is None:
+                                chosen = min(
+                                    detected_objects,
+                                    key=lambda o: (o["cx"] - click[0]) ** 2
+                                    + (o["cy"] - click[1]) ** 2,
+                                )
+                                if np.hypot(chosen["cx"] - click[0], chosen["cy"] - click[1]) > 50:
+                                    chosen = None
+
+                            if chosen is not None:
+                                _pending = {
+                                    "payload": (
+                                        f"{shape_key(chosen['shape'])}, "
+                                        f"{chosen['dx_mm']:.2f},{chosen['dy_mm']:.2f}"
+                                    ),
+                                    "bbox": chosen["bbox"],
+                                }
+
+                        # Show the pending selection and send it once the robot is connected
+                        if _pending is not None:
+                            px, py, pw, ph = _pending["bbox"]
+                            cv2.rectangle(filtered_img, (px, py), (px + pw, py + ph), (255, 0, 255), 2)
+                            cv2.putText(
+                                filtered_img,
+                                "Selected",
+                                (px, py - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.6,
+                                (255, 0, 255),
+                                2,
+                                cv2.LINE_AA,
+                            )
+                            if robot_link.connected:
+                                robot_link.send(_pending["payload"])
+                                _last_sent = _pending["payload"]
+                                _pending = None
+                                cv2.putText(
+                                    filtered_img,
+                                    f"Sent: {_last_sent}",
+                                    (px, py - 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.6,
+                                    (0, 255, 0),
+                                    2,
+                                    cv2.LINE_AA,
+                                )
+
                         text = f"Ratio: {pixel_cm_ratio:.4f} px/mm"
                         cv2.putText(
                             filtered_img,
@@ -203,6 +319,21 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                             cv2.LINE_AA,
                         )
 
+                    # Bottom-left status bar
+                    status = "Robot: connected" if robot_link.connected else "Robot: waiting..."
+                    if _last_sent is not None:
+                        status += f" | Last sent: {_last_sent}"
+                    cv2.putText(
+                        filtered_img,
+                        status,
+                        (30, filtered_img.shape[0] - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0) if robot_link.connected else (0, 165, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
                     cv2.imshow("Basler Camera Feed", filtered_img)
 
                     if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -214,3 +345,4 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
 
     camera.StopGrabbing()
     cv2.destroyAllWindows()
+    robot_link.close()

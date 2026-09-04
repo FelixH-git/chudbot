@@ -12,6 +12,65 @@ targets = {
     "phome20": [[102.02, 105.35, 168.09], [0.00799293, 0.157506, -0.987477, -0.00426628], [0, 0, -1, 0], [9e09, 9e09, 9e09, 9e09, 9e09, 9e09]]
 }
 
+
+class RobotLink:
+    """PC-side TCP server link: the ABB robot connects to us, then we can send
+    string payloads (e.g. 'shape,X,Y') to it. Reused by the CV script too."""
+
+    def __init__(self, host="192.168.125.201", port=5000):
+        self.host = host
+        self.port = port
+        self.server_socket = None
+        self.client_socket = None
+        self.client_ip = None
+
+    def start(self):
+        """Bind, listen and block until the robot connects."""
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.bind((self.host, self.port))
+        self.server_socket.listen(1)
+        print(f"Waiting for the robot to connect to {self.host}:{self.port} ...")
+        try:
+            self.client_socket, self.client_ip = self.server_socket.accept()
+        except OSError:
+            return self
+        print(f"Robot at address {self.client_ip} connected.")
+        return self
+
+    @property
+    def connected(self):
+        return self.client_socket is not None
+
+    def send(self, data, read_reply=False):
+        """Send a payload string to the robot. Fire-and-forget by default so a
+        live loop is never blocked; set read_reply=True to wait for a reply."""
+        if self.client_socket is None:
+            print("Robot not connected - nothing sent.")
+            return None
+        self.client_socket.send(data.encode("UTF-8"))
+        print(f"Sent to robot: {data}")
+        if read_reply:
+            try:
+                self.client_socket.settimeout(1.0)
+                reply = self.client_socket.recv(4094).decode("latin-1")
+                print("Reply from robot:", reply)
+                return reply
+            except socket.timeout:
+                return None
+        return None
+
+    def close(self):
+        for sock in (self.client_socket, self.server_socket):
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+        self.client_socket = None
+        self.server_socket = None
+
+
 def sendToRobot(sendData):
     client_socket.send(sendData.encode("UTF-8"))
     print("Sent data to robot!")
@@ -22,12 +81,11 @@ def sendToRobot(sendData):
     return client_message
 
 if __name__ == '__main__':
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('192.168.125.201', 5000))
-    server_socket.listen()
+    link = RobotLink()
+    link.start()
 
-    (client_socket, client_ip) = server_socket.accept()
-    print(f"Robot at address {client_ip} connected.")
+    # Keep sendToRobot() working by pointing it at the connected link's socket
+    client_socket = link.client_socket
     
     while True:
         shape = input("Enter shape (pcircle, psquare, phexa, pstar, or exit): ").strip()
