@@ -67,9 +67,11 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         # Find contours of colored objects separated by black background
                         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+                        object_id = 0  # Running ID for each detected color region
                         for cnt in contours:
                             # Filter out small noise areas
                             if cv2.contourArea(cnt) > 300:
+                                object_id += 1
                                 # Find the center (centroid) of the object using image moments
                                 M = cv2.moments(cnt)
                                 if M["m00"] != 0:
@@ -89,7 +91,21 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                     cv2.line(filtered_img, aruco_center_int, (obj_cx, obj_cy), (255, 255, 0), 2)
                                     # Draw object center point
                                     cv2.circle(filtered_img, (obj_cx, obj_cy), 5, (0, 0, 255), -1)
-                                    
+                                    # Draw the contour outline
+                                    cv2.drawContours(filtered_img, [cnt], -1, (0, 255, 0), 2)
+
+                                    # Display the object ID above the center point
+                                    cv2.putText(
+                                        filtered_img,
+                                        f"ID: {object_id}",
+                                        (obj_cx - 10, obj_cy - 40),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.7,
+                                        (0, 255, 255),
+                                        2,
+                                        cv2.LINE_AA,
+                                    )
+
                                     # Display distance text near the object
                                     dist_text = f"{total_dist_mm:.1f} mm"
                                     cv2.putText(
