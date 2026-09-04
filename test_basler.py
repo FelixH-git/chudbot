@@ -160,20 +160,31 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         aruco_perimeter = cv2.arcLength(scaled_corners[0], True)
                         pixel_cm_ratio = aruco_perimeter / (aruco_length * 4)
 
-                        # Use the top-left corner of the first ArUco marker as the reference point
-                        # (corners are ordered [top-left, top-right, bottom-right, bottom-left])
-                        aruco_ref = scaled_corners[0][0][0]
+                        # Marker corners: [top-left, top-right, bottom-right, bottom-left]
+                        marker_pts = scaled_corners[0][0]
+                        tl = marker_pts[0]
+                        tr = marker_pts[1]
+                        bl = marker_pts[3]
+                        marker_center = np.mean(marker_pts, axis=0)
+
+                        # Marker-local X/Y axes along its top (tl->tr) and left (tl->bl) edges
+                        x_axis = tr - tl
+                        y_axis = bl - tl
+                        x_len = np.linalg.norm(x_axis)
+                        y_len = np.linalg.norm(y_axis)
+                        x_unit = x_axis / x_len if x_len > 0 else np.array([1.0, 0.0])
+                        y_unit = y_axis / y_len if y_len > 0 else np.array([0.0, 1.0])
+
+                        # Use the top-left marker corner as the reference origin
+                        aruco_ref = tl
                         aruco_ref_int = (int(aruco_ref[0]), int(aruco_ref[1]))
                         
                         # Draw the marker reference (corner) point
                         cv2.circle(filtered_img, aruco_ref_int, 5, (255, 0, 0), -1)
 
-                        # X/Y direction arrows along the marker sides (X = red, Y = green).
-                        # Corner order is [top-left, top-right, bottom-right, bottom-left].
-                        marker_pts = scaled_corners[0][0]
-                        marker_center = np.mean(marker_pts, axis=0)
-                        draw_axis_arrow(filtered_img, marker_pts[0], marker_pts[1], (0, 0, 255), "X", marker_center)
-                        draw_axis_arrow(filtered_img, marker_pts[0], marker_pts[3], (0, 255, 0), "Y", marker_center)
+                        # X/Y direction arrows along the marker sides (X = red, Y = green)
+                        draw_axis_arrow(filtered_img, tl, tr, (0, 0, 255), "X", marker_center)
+                        draw_axis_arrow(filtered_img, tl, bl, (0, 255, 0), "Y", marker_center)
 
                         # Find contours of colored objects separated by black background
                         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -193,14 +204,15 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                     # Classify the shape of the colored object
                                     shape = detect_shape(cnt)
                                     
-                                    # Calculate distance in pixels from the ArUco reference corner
-                                    dx_px = obj_cx - aruco_ref[0]
-                                    dy_px = obj_cy - aruco_ref[1]
-                                    
-                                    # Convert pixel delta to millimeters
-                                    dx_mm = dx_px / pixel_cm_ratio
-                                    dy_mm = dy_px / pixel_cm_ratio
-                                    total_dist_mm = np.sqrt(dx_mm**2 + dy_mm**2)
+                                    # Offset of the object center from the ArUco reference corner
+                                    obj_vec = np.array([obj_cx, obj_cy]) - aruco_ref
+
+                                    # Project onto the marker's X (top edge) and Y (left edge)
+                                    # axes, then convert from pixels to millimeters so the
+                                    # coordinates are truly relative to the ArUco marker
+                                    x_mm = np.dot(obj_vec, x_unit) / pixel_cm_ratio
+                                    y_mm = np.dot(obj_vec, y_unit) / pixel_cm_ratio
+                                    total_dist_mm = np.hypot(x_mm, y_mm)
 
                                     # Record this object so a click can select & send it
                                     bx, by, bw, bh = cv2.boundingRect(cnt)
@@ -210,8 +222,8 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                             "cx": obj_cx,
                                             "cy": obj_cy,
                                             "bbox": (bx, by, bw, bh),
-                                            "dx_mm": dx_mm,
-                                            "dy_mm": dy_mm,
+                                            "x_mm": x_mm,
+                                            "y_mm": y_mm,
                                             "shape": shape,
                                         }
                                     )
@@ -247,10 +259,10 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                         cv2.LINE_AA,
                                     )
 
-                                    # Display X/Y position of the object center
+                                    # Display X/Y position relative to the ArUco corner (mm)
                                     cv2.putText(
                                         filtered_img,
-                                        f"X:{obj_cx} Y:{obj_cy}",
+                                        f"X:{x_mm:.1f} Y:{y_mm:.1f} mm",
                                         (obj_cx - 10, obj_cy + 45),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.5,
@@ -298,8 +310,8 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                             if chosen is not None:
                                 _pending = {
                                     "payload": (
-                                        f"{shape_key(chosen['shape'])}, "
-                                        f"{chosen['dx_mm']:.2f},{chosen['dy_mm']:.2f}"
+                                        f"{shape_key(chosen['shape'])},"
+                                        f"{chosen['x_mm']:.2f},{chosen['y_mm']:.2f}"
                                     ),
                                     "bbox": chosen["bbox"],
                                 }
