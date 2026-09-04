@@ -9,6 +9,39 @@ aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100)
 parameters = cv2.aruco.DetectorParameters()
 aruco_detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
 
+
+def detect_shape(cnt):
+    """Classify a contour as square, rectangle, triangle, hexagon, star, circle, etc."""
+    peri = cv2.arcLength(cnt, True)
+    if peri == 0:
+        return "Unknown"
+
+    # Approximate the contour to get its main vertices
+    approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+    vertices = len(approx)
+
+    # Circularity: 1.0 = perfect circle
+    area = cv2.contourArea(cnt)
+    circularity = 4 * np.pi * area / (peri * peri)
+
+    if vertices == 3:
+        return "Triangle"
+    elif vertices == 4:
+        # A square has roughly equal width and height
+        x, y, w, h = cv2.boundingRect(cnt)
+        aspect = w / float(h) if h != 0 else 0
+        if 0.9 <= aspect <= 1.1:
+            return "Square"
+        return "Rectangle"
+    elif vertices == 6:
+        return "Hexagon"
+    elif 8 <= vertices <= 12 and circularity < 0.8:
+        # A 5-pointed star approximates to ~10 sharp corners
+        return "Star"
+    elif circularity > 0.85:
+        return "Circle"
+    return f"Polygon({vertices})"
+
 # Converter to turn raw Bayer sensor data into a color BGR array
 converter = pylon.ImageFormatConverter()
 converter.OutputPixelFormat = pylon.PixelType_BGR8packed
@@ -77,6 +110,9 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                 if M["m00"] != 0:
                                     obj_cx = int(M["m10"] / M["m00"])
                                     obj_cy = int(M["m01"] / M["m00"])
+
+                                    # Classify the shape of the colored object
+                                    shape = detect_shape(cnt)
                                     
                                     # Calculate distance in pixels from ArUco center
                                     dx_px = obj_cx - aruco_center[0]
@@ -98,9 +134,21 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                     cv2.putText(
                                         filtered_img,
                                         f"ID: {object_id}",
-                                        (obj_cx - 10, obj_cy - 40),
+                                        (obj_cx - 10, obj_cy - 55),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.7,
+                                        (0, 255, 255),
+                                        2,
+                                        cv2.LINE_AA,
+                                    )
+
+                                    # Display the detected shape below the center point
+                                    cv2.putText(
+                                        filtered_img,
+                                        shape,
+                                        (obj_cx - 10, obj_cy + 25),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.6,
                                         (0, 255, 255),
                                         2,
                                         cv2.LINE_AA,
@@ -111,7 +159,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                     cv2.putText(
                                         filtered_img,
                                         dist_text,
-                                        (obj_cx + 10, obj_cy - 10),
+                                        (obj_cx + 10, obj_cy - 25),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.6,
                                         (255, 255, 255),
