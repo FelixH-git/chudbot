@@ -90,12 +90,13 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         aruco_perimeter = cv2.arcLength(scaled_corners[0], True)
                         pixel_cm_ratio = aruco_perimeter / (aruco_length * 4)
 
-                        # Calculate center of the first ArUco marker (average of its 4 corners)
-                        aruco_center = np.mean(scaled_corners[0][0], axis=0)
-                        aruco_center_int = (int(aruco_center[0]), int(aruco_center[1]))
+                        # Use the top-left corner of the first ArUco marker as the reference point
+                        # (corners are ordered [top-left, top-right, bottom-right, bottom-left])
+                        aruco_ref = scaled_corners[0][0][0]
+                        aruco_ref_int = (int(aruco_ref[0]), int(aruco_ref[1]))
                         
-                        # Draw a marker center point
-                        cv2.circle(filtered_img, aruco_center_int, 5, (255, 0, 0), -1)
+                        # Draw the marker reference (corner) point
+                        cv2.circle(filtered_img, aruco_ref_int, 5, (255, 0, 0), -1)
 
                         # Find contours of colored objects separated by black background
                         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -114,17 +115,17 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                     # Classify the shape of the colored object
                                     shape = detect_shape(cnt)
                                     
-                                    # Calculate distance in pixels from ArUco center
-                                    dx_px = obj_cx - aruco_center[0]
-                                    dy_px = obj_cy - aruco_center[1]
+                                    # Calculate distance in pixels from the ArUco reference corner
+                                    dx_px = obj_cx - aruco_ref[0]
+                                    dy_px = obj_cy - aruco_ref[1]
                                     
                                     # Convert pixel delta to millimeters
                                     dx_mm = dx_px / pixel_cm_ratio
                                     dy_mm = dy_px / pixel_cm_ratio
                                     total_dist_mm = np.sqrt(dx_mm**2 + dy_mm**2)
 
-                                    # Draw line from ArUco center to object center
-                                    cv2.line(filtered_img, aruco_center_int, (obj_cx, obj_cy), (255, 255, 0), 2)
+                                    # Draw line from the ArUco corner to the object center
+                                    cv2.line(filtered_img, aruco_ref_int, (obj_cx, obj_cy), (255, 255, 0), 2)
                                     # Draw object center point
                                     cv2.circle(filtered_img, (obj_cx, obj_cy), 5, (0, 0, 255), -1)
                                     # Draw the contour outline
@@ -151,6 +152,18 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                         0.6,
                                         (0, 255, 255),
                                         2,
+                                        cv2.LINE_AA,
+                                    )
+
+                                    # Display X/Y position of the object center
+                                    cv2.putText(
+                                        filtered_img,
+                                        f"X:{obj_cx} Y:{obj_cy}",
+                                        (obj_cx - 10, obj_cy + 45),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.5,
+                                        (255, 255, 255),
+                                        1,
                                         cv2.LINE_AA,
                                     )
 
