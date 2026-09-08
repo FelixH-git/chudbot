@@ -1,0 +1,289 @@
+MODULE MainModule
+	TASK PERS tooldata tsuck:=[TRUE,[[-213.978,-32.7493,167.349],[1,0,0,0]],[1.1,[0,20,25],[1,0,0,0],0,0,0]];
+	TASK PERS wobjdata wobj1:=[FALSE,TRUE,"",[[959.838,-291.657,795.046],[0.999978,-0.00504122,0.00423326,6.27363E-05]],[[0,0,0],[1,0,0,0]]];
+	TASK PERS wobjdata wobjPick:=[FALSE,TRUE,"",[[1072.14,169.357,806.669],[0.999792,0.00155501,-0.00547758,-0.0195781]],[[0,0,0],[1,0,0,0]]];
+	TASK PERS wobjdata wobjPlace:=[FALSE,TRUE,"",[[1061.98,-210.022,803.109],[0.999481,0.00692713,-0.0159569,-0.0271259]],[[0,0,0],[1,0,0,0]]];
+	CONST robtarget phexa:=[[43.07,156.38,4.75],[0.00892356,0.157212,-0.987515,-0.00424525],[0,0,0,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget pstar:=[[89.73,95.53,6.17],[0.00894014,0.157212,-0.987515,-0.00422388],[0,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget pcircle:=[[148.24,170.09,6.39],[0.00908413,0.157235,-0.987511,-0.00408367],[0,0,0,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget psquare:=[[147.44,38.19,5.31],[0.00826666,0.157305,-0.987506,-0.00431963],[0,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget phome:=[[-25.31,281.57,234.72],[0.0145349,0.160659,-0.986901,-0.00193449],[0,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget papproach:=[[76.88,101.84,163.30],[0.00846166,0.157255,-0.987515,-0.00378512],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget phome10:=[[56.33,485.14,249.87],[0.0148255,0.160884,-0.98686,-0.00205593],[0,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget phome20:=[[282.03,569.76,130.91],[0.00804639,0.157426,-0.987488,-0.00438806],[0,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    
+    VAR bool keepRunning := TRUE;
+    VAR string Server_message;
+    VAR string client_message;
+    var bool connected := FALSE;
+    PERS robtarget shape:=[[118.29,-181.05,2],[0.00826666,0.157305,-0.987506,-0.00431963],[0,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    VAR string x_str;
+    VAR string y_str;
+    VAR num x_val;
+    VAR num y_val;
+    VAR string shape_name;
+    VAR num idx1;
+    VAR num idx2;
+    VAR bool parse_ok;
+	TASK PERS wobjdata wobjAiPlaceTray:=[FALSE,TRUE,"",[[1260.7,-295.297,805.883],[0.999907,0.00186707,-0.0135008,7.64184E-05]],[[0,0,0],[1,0,0,0]]];
+	TASK PERS wobjdata wobjAruco:=[FALSE,TRUE,"",[[1190.74,291.064,795.822],[0.999893,-0.012889,-0.00608741,-0.00331874]],[[0,0,0],[1,0,0,0]]];
+	CONST robtarget aiStar:=[[86.12,97.14,8.68],[9.87735E-05,-0.135742,0.99072,0.00689827],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiStar10:=[[449.34,143.19,20.46],[0.00791822,-0.130735,0.991346,0.00885416],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiTriangle10:=[[435.10,32.65,23.00],[0.00791864,-0.130736,0.991346,0.00886035],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiTriangle20:=[[327.53,26.05,22.41],[0.00792467,-0.130718,0.991348,0.00885918],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiCircle10:=[[335.90,155.62,28.22],[0.0079259,-0.130732,0.991346,0.00886776],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiTriangle:=[[146.68,148.36,4.91],[3.86539E-05,0.135987,-0.990687,-0.006873],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiSquare:=[[33.82,156.67,8.77],[9.63617E-05,-0.135741,0.99072,0.0068956],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiCircle:=[[28.61,27.96,9.65],[4.48519E-05,0.135979,-0.990688,-0.0068596],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget aiHexagon:=[[136.90,34.15,5.34],[4.45838E-05,0.136,-0.990685,-0.00687121],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+	CONST robtarget papproach10:=[[33.88,156.64,8.69],[5.88279E-05,-0.135785,0.990715,0.006827],[-1,0,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    PROC main()
+        
+        !MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        !MoveL pcircle, v100 , fine, tsuck\WObj:=wobjPick;
+        !suckOn;
+        !WaitTime(2);
+        !MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        !MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+        !MoveL pcircle, v100 , fine, tsuck\WObj:=wobjPlace;
+        !WaitTime(1);
+        !suckOff;
+        !WaitTime(1);
+        
+        
+   
+        
+        
+        
+!        var num selectedKey;
+        
+!        TPReadFK selectedKey, "select shaepe", "circle","square","Hexagon","star", "exit";
+        
+!        TEST selectedKey
+!        CASE 1:
+!            waitforOK("Circle");
+            
+!            circle;
+!        CASE 2:
+!            waitforOK("Square");
+            
+!            square;
+!        CASE 3:
+!            waitforOK("Hexagon");
+        
+!            hexagon;
+!        CASE 4:
+!            waitforOK("Star");
+        
+!            star;
+!        CASE 5:
+!            TPWrite "Exiting...";
+!            EXIT;
+!        ENDTEST        
+        
+
+
+
+        
+        !connect to Server               
+        
+        !handle answer from server                                        
+        Server_message:=RobotClientReciveMessage();          
+        TPWrite "SERVER SAYS:"+Server_message;
+        
+        idx1 := StrFind(Server_message, 1, ",");
+        
+        IF idx1 > 0 THEN
+            shape_name := StrPart(Server_message, 1, idx1 -1);
+            
+            idx2 := StrFind(Server_message, idx1 + 1, ",");
+        
+            IF idx2 > 0 THEN
+                x_str := StrPart(Server_message, idx1 + 1, idx2 - (idx1+1));
+                
+                ! Find the third comma separating Y coordinate and the angle
+                idx3 := StrFind(Server_message, idx2 + 1, ",");
+                
+                IF idx3 > 0 THEN
+                    y_str := StrPart(Server_message, idx2 + 1, idx3 - (idx2 + 1));
+                    angle_str := StrPart(Server_message, idx3 + 1, StrLen(Server_message) - idx3);
+                    
+                    parse_ok := StrToVal(x_str, x_val);
+                    parse_ok := StrToVal(y_str, y_val);
+                    parse_ok := StrToVal(angle_str, angle_val);
+                    
+                    IF parse_ok THEN
+                        shape.trans.x := x_val;
+                        shape.trans.y := y_val;
+                        shape.trans.z := 2.0;
+                        
+                        ! Apply the orientation angle around the Z axis
+                        ! Assuming your orientation variable or quaternion uses angle_val (in degrees)
+                        shape.rot := OrientZYX(angle_val, 0.0, 0.0);
+                    ENDIF
+                ENDIF
+                
+            ENDIF
+        ENDIF
+        
+        !Send message to server                              
+        client_message:="Time to die";                       
+        RobotClienSendMessage(client_message);               
+                                                            
+        !disconnect and close         
+        IF shape_name = "exit" THEN
+            RobotClientCloseAndDisconnect;   
+        ENDIF
+        
+        move_to_shape2v(shape_name);        
+        
+        
+        
+        
+    ENDPROC
+        PROC waitforOK(string action)
+            TPWrite action;
+            WaitDI diOkButton, 1;
+            
+            WaitDI diOkButton, 0;
+            
+            TPWrite "Performing " + action;
+        ENDPROC
+    
+        PROC move_to_shape()
+            waitforOK("");
+            MoveL phome20, v100, fine, tsuck\WObj:=wobj1;
+            MoveL shape, v100 , fine, tsuck\WObj:=wobjAruco;
+            suckOn;
+            WaitTime(2);
+            MoveL phome20, v100, fine, tsuck\WObj:=wobj1;
+            MoveL papproach, v100, fine, tsuck\WObj:=wobj1;
+            
+            
+            
+            MoveL shape, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+            WaitTime(1);
+            suckOff;
+            WaitTime(1);
+            MoveL papproach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+        ENDPROC
+        
+        
+        PROC move_to_shape2v(string shape_input)
+            waitforOK("");
+            MoveL phome20, v100, fine, tsuck\WObj:=wobj1;
+            MoveL shape, v100 , fine, tsuck\WObj:=wobjAruco;
+            suckOn;
+            WaitTime(1);
+            MoveL papproach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+
+            
+            !movers 
+            IF shape_input = "pstar" THEN
+                MoveL aiStar, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime(1);
+                suckOff;
+            ENDIF
+            IF shape_input = "psquare" THEN
+                MoveL aiSquare, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime(1);
+                suckOff;
+            ENDIF
+            IF shape_input = "phexa" THEN
+                MoveL aiHexagon, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime(1);
+                suckOff;
+            ENDIF
+            IF shape_input = "pcircle" THEN
+                MoveL aiCircle, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime(1);
+                suckOff;
+            ENDIF
+            IF shape_input = "ptriangle" THEN
+                MoveL aiTriangle, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime(1);
+                suckOff;
+            ENDIF
+            MoveL papproach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+            
+            
+
+            
+        endproc 
+        
+        PROC star()
+
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjAruco;
+        MoveL pstar, v100 , fine, tsuck\WObj:=wobjAruco;
+        suckOn;
+        WaitTime(2);
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL pstar, v100 , fine, tsuck\WObj:=wobjPlace;
+        WaitTime(1);
+        suckOff;
+        WaitTime(1);
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+        
+
+        
+    ENDPROC
+    
+     PROC square()
+
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL psquare, v100 , fine, tsuck\WObj:=wobjPick;
+        suckOn;
+        WaitTime(2);
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL psquare, v100 , fine, tsuck\WObj:=wobjPlace;
+        WaitTime(1);
+        suckOff;
+        WaitTime(1);
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+
+    
+    ENDPROC
+    
+    PROC hexagon()
+
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL phexa, v100 , fine, tsuck\WObj:=wobjPick;
+        suckOn;
+        WaitTime(2);
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL phexa, v100 , fine, tsuck\WObj:=wobjPlace;
+        WaitTime(1);
+        suckOff;
+        WaitTime(1);
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+
+        
+    ENDPROC
+    
+    PROC circle()
+
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL pcircle, v100 , fine, tsuck\WObj:=wobjPick;
+        suckOn;
+        WaitTime(2);
+        MoveL phome20, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+        MoveL pcircle, v100 , fine, tsuck\WObj:=wobjPlace;
+        WaitTime(1);
+        suckOff;
+        WaitTime(1);
+        MoveL papproach, v100, fine, tsuck\WObj:=wobjPick;
+
+        
+    ENDPROC
+    proc suckOn()
+        SetDO doValve2, 1;
+    ENDPROC
+    PROC suckOff()
+        SetDO doValve2, 0;
+    ENDPROC
+        
+ENDMODULE
