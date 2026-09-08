@@ -123,12 +123,20 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
 
     camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
+    # ---- Timeout / error handling state ----
+    RETRIEVE_TIMEOUT_MS = 5000
+    MAX_CONSECUTIVE_TIMEOUTS = 3   # restart grabbing after this many timeouts in a row
+    MAX_GRAB_RESTARTS = 3          # give up entirely after this many failed restarts
+    consecutive_timeouts = 0       # number of retrieve timeouts in a row
+    grab_restarts = 0              # how many times the grab engine was restarted
+
     while camera.IsGrabbing():
         try:
             with camera.RetrieveResult(
-                5000, pylon.TimeoutHandling_ThrowException
+                RETRIEVE_TIMEOUT_MS, pylon.TimeoutHandling_ThrowException
             ) as grab_result:
                 if grab_result.GrabSucceeded():
+                    consecutive_timeouts = 0  # a frame arrived - reset the timeout streak
                     # Convert raw frame to color BGR numpy array
                     image = converter.Convert(grab_result)
                     img = image.GetArray()
@@ -389,8 +397,48 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         break
 
         except Exception as e:
-            print(f"Error caught: {e}")
-            continue
+            # TimeoutException may not be exposed by every pypylon build, so also
+            # detect it by name/text. Either way, keep the frame loop alive.
+            is_timeout = type(e).__name__ == "TimeoutException" or "grab timed out" in str(e).lower()
+
+            if not is_timeout:
+                # Non-timeout errors (camera lost, internal errors, etc.)
+                print(f"Error caught: {e}")
+                continue
+
+            consecutive_timeouts += 1
+            print(
+                f"[Timeout {consecutive_timeouts}/{MAX_CONSECUTIVE_TIMEOUTS}] "
+                f"No frame within {RETRIEVE_TIMEOUT_MS / 1000:.0f}s: {e}"
+            )
+
+            # A single missed frame is often a hiccup - keep grabbing.
+            if consecutive_timeouts < MAX_CONSECUTIVE_TIMEOUTS:
+                continue
+
+            # Too many consecutive timeouts: the grab engine is likely stuck.
+            grab_restarts += 1
+            if grab_restarts > MAX_GRAB_RESTARTS:
+                print(
+                    f"Giving up after {MAX_GRAB_RESTARTS} restart(s) - "
+                    "camera is not streaming."
+                )
+                break
+
+            print(
+                f"Restarting grab engine (attempt {grab_restarts}/"
+                f"{MAX_GRAB_RESTARTS})..."
+            )
+            try:
+                camera.StopGrabbing()
+            except Exception as stop_err:
+                print(f"  StopGrabbing failed: {stop_err}")
+            try:
+                camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+                consecutive_timeouts = 0  # try a fresh streak after a restart
+                print("  Grab engine restarted.")
+            except Exception as start_err:
+                print(f"  StartGrabbing failed: {start_err}")
 
     camera.StopGrabbing()
     cv2.destroyAllWindows()
