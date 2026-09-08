@@ -24,6 +24,9 @@ MODULE MainModule
     VAR string shape_name;
     VAR num idx1;
     VAR num idx2;
+    VAR num idx3;
+    VAR string angle_str;
+    VAR num angle_val;
     VAR bool parse_ok;
 	TASK PERS wobjdata wobjAiPlaceTray:=[FALSE,TRUE,"",[[1260.7,-295.297,805.883],[0.999907,0.00186707,-0.0135008,7.64184E-05]],[[0,0,0],[1,0,0,0]]];
 	TASK PERS wobjdata wobjAruco:=[FALSE,TRUE,"",[[1190.74,291.064,795.822],[0.999893,-0.012889,-0.00608741,-0.00331874]],[[0,0,0],[1,0,0,0]]];
@@ -107,10 +110,15 @@ MODULE MainModule
                 IF idx3 > 0 THEN
                     y_str := StrPart(Server_message, idx2 + 1, idx3 - (idx2 + 1));
                     angle_str := StrPart(Server_message, idx3 + 1, StrLen(Server_message) - idx3);
+                ELSE
+                    ! Angle field missing - treat the 3rd field as Y, default the rotation to 0 deg
+                    y_str := StrPart(Server_message, idx2 + 1, StrLen(Server_message) - idx2);
+                    angle_str := "0";
+                ENDIF
                     
                     parse_ok := StrToVal(x_str, x_val);
-                    parse_ok := StrToVal(y_str, y_val);
-                    parse_ok := StrToVal(angle_str, angle_val);
+                    parse_ok := parse_ok AND StrToVal(y_str, y_val);
+                    parse_ok := parse_ok AND StrToVal(angle_str, angle_val);
                     
                     IF parse_ok THEN
                         shape.trans.x := x_val;

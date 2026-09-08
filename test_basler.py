@@ -60,6 +60,112 @@ def shape_key(shape_name):
     return mapping.get(shape_name, shape_name.lower())
 
 
+# =====================================================================
+# ---- Placement-orientation control (ADJUST THESE TO CALIBRATE) ----
+# =====================================================================
+# Why this exists: the robot picks every part with its wrist rotated so the
+# part's "alignment feature" is gripped the same way each time, then drops it
+# at a FIXED ai* target in wobjAiPlaceTray. Because the wrist rotation sent to
+# the robot equals the object's measured rotation, every part is seated at the
+# SAME orientation and fits its placement point (the place WObj) every time.
+#
+# Angles are measured in the ArUco-marker frame (marker X axis = "0 deg") -
+# the same frame the X/Y mm coordinates are computed in, which maps 1:1 to
+# wobjAruco in the robot.
+
+# Rotational symmetry of each shape (deg). The measured feature angle is
+# folded into [0, period) so the robot only needs a small wrist rotation
+# to grip the part "straight" (symmetric parts fit the same either way).
+SHAPE_SYMMETRY_DEG = {
+    "Square": 90.0,
+    "Rectangle": 180.0,
+    "Hexagon": 60.0,
+    "Triangle": 120.0,  # assumes equilateral
+    "Star": 72.0,       # 5-fold star
+    "Circle": 360.0,
+}
+
+# Per-shape fixed offset (deg) added before sending. Leave at 0 unless one
+# shape needs its own correction (e.g. star reference choice).
+ANGLE_BIAS_DEG = {
+    "Square": 0.0,
+    "Rectangle": 0.0,
+    "Hexagon": 0.0,
+    "Triangle": 0.0,
+    "Star": 0.0,
+}
+
+# MASTER calibration knob (deg). Absorbs the offset between the marker frame
+# and the robot's wrist-zero / place frame. Adjust it on the bench - or live
+# while running with the '+'/'-' keys (see on-screen HUD) - until the parts
+# seat cleanly in the place WObj, then write the final number back here.
+ANGLE_MASTER_OFFSET_DEG = 0.0
+
+# If the robot turns the wrong way (camera/marker frame is mirrored relative
+# to the robot frame), enable this or press 'f' while the program runs.
+ANGLE_FLIP_SIGN = False
+
+# Live-tunable state (changed with the keyboard - see HUD / keys below)
+_angle_offset = ANGLE_MASTER_OFFSET_DEG  # degrees added to every angle
+_angle_flip = ANGLE_FLIP_SIGN            # mirror the angle sign
+_angle_step = 1.0                        # degrees per '+'/'-' press
+
+
+def _poly_points(approx):
+    return approx.reshape(-1, 2).astype(np.float64)
+
+
+def longest_edge_vector(poly_pts):
+    """Direction vector (image frame) of the polygon's longest edge."""
+    n = len(poly_pts)
+    best_len, best_vec = -1.0, None
+    for i in range(n):
+        d = poly_pts[(i + 1) % n] - poly_pts[i]
+        ln = np.hypot(d[0], d[1])
+        if ln > best_len:
+            best_len, best_vec = ln, d
+    return best_vec
+
+
+def shape_feature_vector(cnt, shape, cx, cy):
+    """2D vector (image frame) defining "0 deg" for this shape, so the robot
+    can grip it in a canonical orientation:
+      - Square/Rectangle/Triangle/Hexagon: along its longest edge.
+      - Star: from the centre toward the point between its two "feet"
+        (the two lowest vertices) - i.e. the star standing upright.
+      - Circle: no feature - any rotation fits the slot.
+    """
+    if shape == "Circle":
+        return None
+    peri = cv2.arcLength(cnt, True)
+    if peri == 0:
+        return None
+    if shape == "Star":
+        approx = cv2.approxPolyDP(cnt, 0.01 * peri, True)  # fine: keeps all 10 corners
+        pts = _poly_points(approx)
+        if len(pts) < 3:
+            return None
+        # Two vertices with the largest image-y are the "feet" the star rests on
+        order = np.argsort(pts[:, 1])[::-1]
+        feet_mid = pts[order[:2]].mean(axis=0)
+        up = np.array([cx, cy], dtype=np.float64) - feet_mid
+        return up if np.hypot(up[0], up[1]) > 1e-6 else np.array([0.0, -1.0])
+    approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+    pts = _poly_points(approx)
+    return longest_edge_vector(pts) if len(pts) >= 2 else None
+
+
+def angle_in_marker_frame(vec, x_unit, y_unit):
+    """Degrees of a direction vector measured from the marker X axis, in the
+    marker's own frame (marker X = 0 deg). Mirrors how x_mm/y_mm are built."""
+    return np.degrees(np.arctan2(np.dot(vec, y_unit), np.dot(vec, x_unit)))
+
+
+def wrap_angle(angle_deg):
+    """Wrap into (-180, 180] for a tidy number to send to the robot."""
+    return ((angle_deg + 180.0) % 360.0) - 180.0
+
+
 # ---- Socket link to the ABB robot (PC = server, robot connects) ----
 robot_link = RobotLink()
 threading.Thread(target=robot_link.start, daemon=True).start()
@@ -211,6 +317,22 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
 
                                     # Classify the shape of the colored object
                                     shape = detect_shape(cnt)
+
+                                    # ---- Object rotation, measured in the marker frame ----
+                                    feat_vec = shape_feature_vector(cnt, shape, obj_cx, obj_cy)
+                                    if feat_vec is None:
+                                        angle_deg = 0.0  # circle / unknown - fits anyway
+                                    else:
+                                        raw = angle_in_marker_frame(feat_vec, x_unit, y_unit)
+                                        period = SHAPE_SYMMETRY_DEG.get(shape, 360.0)
+                                        # Fold through the shape's symmetry so the wrist only
+                                        # needs a small rotation to grip the part "straight"
+                                        angle_deg = raw % period if period > 0 else raw
+                                        angle_deg += ANGLE_BIAS_DEG.get(shape, 0.0)
+                                        angle_deg += _angle_offset
+                                        if _angle_flip:
+                                            angle_deg = -angle_deg
+                                        angle_deg = wrap_angle(angle_deg)
                                     
                                     # Offset of the object center from the ArUco reference corner
                                     obj_vec = np.array([obj_cx, obj_cy]) - aruco_ref
@@ -233,6 +355,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                             "x_mm": x_mm,
                                             "y_mm": y_mm,
                                             "shape": shape,
+                                            "angle_deg": angle_deg,
                                         }
                                     )
 
@@ -279,6 +402,18 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                                         cv2.LINE_AA,
                                     )
 
+                                    # Display the rotation angle that will be sent to the robot
+                                    cv2.putText(
+                                        filtered_img,
+                                        f"Rot: {angle_deg:.1f} deg",
+                                        (obj_cx - 10, obj_cy + 65),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.5,
+                                        (255, 255, 0),
+                                        1,
+                                        cv2.LINE_AA,
+                                    )
+
                                     # Display distance text near the object
                                     dist_text = f"{total_dist_mm:.1f} mm"
                                     cv2.putText(
@@ -318,8 +453,9 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                             if chosen is not None:
                                 _pending = {
                                     "payload": (
-                                        f"{shape_key(chosen['shape'])},"
-                                        f"{chosen['y_mm']:.2f},{chosen['x_mm']:.2f}"
+                                        f"{shape_key(chosen['shape'])}"
+                                        f",{chosen['y_mm']:.2f},{chosen['x_mm']:.2f}"
+                                        f",{chosen['angle_deg']:.2f}"
                                     ),
                                     "bbox": chosen["bbox"],
                                 }
@@ -391,10 +527,47 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         cv2.LINE_AA,
                     )
 
+                    # Rotation-calibration HUD (live tuning state)
+                    flip_str = "ON" if _angle_flip else "OFF"
+                    cv2.putText(
+                        filtered_img,
+                        f"Angle: {_angle_offset:+.1f} deg | sign flip: {flip_str}",
+                        (30, filtered_img.shape[0] - 45),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+                    cv2.putText(
+                        filtered_img,
+                        "'+'/'-' adjust angle | 'f' flip sign | 'r' reset | 'q' quit",
+                        (30, filtered_img.shape[0] - 25),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (200, 200, 200),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
                     cv2.imshow("Basler Camera Feed", filtered_img)
 
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q"):
                         break
+                    elif key in (ord("+"), ord("=")):
+                        _angle_offset += _angle_step
+                        print(f"Angle offset: {_angle_offset:+.1f} deg")
+                    elif key == ord("-"):
+                        _angle_offset -= _angle_step
+                        print(f"Angle offset: {_angle_offset:+.1f} deg")
+                    elif key == ord("f"):
+                        _angle_flip = not _angle_flip
+                        print(f"Angle sign flip: {'ON' if _angle_flip else 'OFF'}")
+                    elif key == ord("r"):
+                        _angle_offset = ANGLE_MASTER_OFFSET_DEG
+                        _angle_flip = ANGLE_FLIP_SIGN
+                        print("Angle tuning reset to the configured defaults.")
 
         except Exception as e:
             # TimeoutException may not be exposed by every pypylon build, so also
