@@ -1,0 +1,17 @@
+(env) student@pi-group07:~/chudbot $ python3 test_basler.py 
+Waiting for the robot to connect to 192.168.125.201:5000 ...
+/home/student/chudbot/test_basler.py:114: DeprecationWarning: Setting a feature value by direct assignment is deprecated. Use <nodemap>.OutputBitAlignment.Value = MsbAligned
+  converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
+Using device: a2A2448-75ucBAS
+qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in "/home/student/chudbot/env/lib/python3.13/site-packages/cv2/qt/plugins"
+QFontDatabase: Cannot find font directory /home/student/chudbot/env/lib/python3.13/site-packages/cv2/qt/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+QFontDatabase: Cannot find font directory /home/student/chudbot/env/lib/python3.13/site-packages/cv2/qt/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+QFontDatabase: Cannot find font directory /home/student/chudbot/env/lib/python3.13/site-packages/cv2/qt/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+QFontDatabase: Cannot find font directory /home/student/chudbot/env/lib/python3.13/site-packages/cv2/qt/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+QFontDatabase: Cannot find font directory /home/student/chudbot/env/lib/python3.13/site-packages/cv2/qt/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+Error caught: Grab timed out. Possible reasons are: The image transport from the camera device is not working properly, e.g., all GigE network packets for streaming are dropped; The camera uses explicit triggering (see TriggerSelector for more information) and has not been triggered; Single frame acquisition mode is used and one frame has already been acquired; The acquisition has not been started or has been stopped. : TimeoutException thrown (file 'InstantCameraImpl.h', line 1058)
