@@ -1,3 +1,5 @@
+# Author Nils Wikström niwi0007
+
 """
 main.py - Multithreaded Vision & Robot Control System
 Fulfills all course requirements with 4 dedicated threads:
@@ -20,7 +22,7 @@ from camera import BaslerCamera
 from socketConnection import RobotLink
 from vision import DetectedShape, VisionPipeline
 
-# ── SHARED THREAD QUEUES & STATE ──────────────────────────────────────────────
+# SHARED THREAD QUEUES & STATE
 frame_snapshot_queue: queue.Queue = queue.Queue(maxsize=1)
 coord_translation_queue: queue.Queue = queue.Queue(maxsize=2)
 robot_command_queue: queue.Queue = queue.Queue()
@@ -34,7 +36,7 @@ selected_shape_info: Optional[dict] = None  # Holds shape info to flash gold on 
 stop_event = threading.Event()
 
 
-# ── THREAD 1: AI MODEL INFERENCE ──────────────────────────────────────────────
+# THREAD 1: AI MODEL INFERENCE 
 def thread_ai_inference(pipeline: VisionPipeline):
     """Worker Thread: Continuously grabs frame snapshots and runs the ONNX model."""
     print("[Thread 1: AI Inference] Started.")
@@ -61,7 +63,7 @@ def thread_ai_inference(pipeline: VisionPipeline):
     print("[Thread 1: AI Inference] Stopped.")
 
 
-# ── THREAD 2: COORDINATE TRANSLATION ──────────────────────────────────────────
+# THREAD 2: COORDINATE TRANSLATION
 def thread_coord_translation(pipeline: VisionPipeline):
     """Worker Thread: Translates detected pixel centers into robot table mm."""
     global latest_shapes
@@ -93,7 +95,7 @@ def thread_coord_translation(pipeline: VisionPipeline):
     print("[Thread 2: Coordinate Translation] Stopped.")
 
 
-# ── THREAD 3: SERVER COMMUNICATION (ABB ROBOT) ────────────────────────────────
+#THREAD 3: SERVER COMMUNICATION (ABB ROBOT)
 def thread_robot_server(robot_link: RobotLink):
     """Worker Thread: Manages TCP connection and sends pick commands to the ABB robot."""
     print("[Thread 3: Server Communication] Started.")
@@ -117,7 +119,7 @@ def thread_robot_server(robot_link: RobotLink):
     print("[Thread 3: Server Communication] Stopped.")
 
 
-# ── MOUSE CLICK HANDLER (CLICK-TO-PICK) ───────────────────────────────────────
+#MOUSE CLICK HANDLER (CLICK-TO-PICK)
 def on_mouse_click(event, mouse_x, mouse_y, flags, param):
     """Called by OpenCV whenever the user clicks the mouse on the video window."""
     global selected_shape_info
@@ -143,7 +145,7 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param):
                 break
 
 
-# ── THREAD 4: GRAPHICAL USER INTERFACE (MAIN THREAD) ──────────────────────────
+#THREAD 4: GRAPHICAL USER INTERFACE (MAIN THREAD)
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "..", "MISC", "shape_3head_model.onnx")

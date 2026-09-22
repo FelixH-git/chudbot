@@ -1,3 +1,4 @@
+# Author Nils Wikström niwi0007
 """
 Vison pipeline for shape detection and robot corindate extraction 
 arUco tag detection for real world calibraton (pixels -> mm )
@@ -103,7 +104,6 @@ class VisionPipeline:
         self.homography_matrix, _ = cv2.findHomography(pts_px, pts_mm)
         return True
 
-    # Alias for backward compatibility:
     def updateHomography(self, frame_bgr: np.ndarray) -> bool:
         return self.update_homography(frame_bgr)
     
@@ -256,7 +256,6 @@ class VisionPipeline:
             bbox=bbox,
         )
 
-    # ── FUNCTIONALITY 3: FULL FRAME PIPELINE
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:
         """
         Processes a frame: calibrates, detects, infers, and translates coords.
@@ -273,7 +272,6 @@ class VisionPipeline:
 
         return detections
 
-    # ── FUNCTIONALITY 4: GUI HUD RENDERING
     def draw_hud(
         self, frame_bgr: np.ndarray, detections: List[DetectedShape]
     ) -> np.ndarray:

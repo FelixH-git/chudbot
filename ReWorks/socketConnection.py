@@ -1,5 +1,5 @@
+# Author Nils Wikström niwi0007
 import socket
-
 
 class RobotLink:
     def __init__(self, host: str = "0.0.0.0", port: int = 5000):
