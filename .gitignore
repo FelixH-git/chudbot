@@ -1,0 +1,15 @@
+# Python Virtual Environment
+.RobotSocket/
+venv/
+env/
+ENV/
+
+# Byte-compiled / cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
