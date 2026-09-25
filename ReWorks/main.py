@@ -31,12 +31,7 @@ shapes_lock = threading.Lock()
 latest_shapes: List[DetectedShape] = []
 
 selected_shape_lock = threading.Lock()
-selected_shape: str = "Circle"  # Default selected shape on program start
-selected_shape_info: Optional[dict] = {
-    "shape": "Circle",
-    "bbox": (0, 0, 0, 0),
-    "expire_time": 0.0,
-}  # Initialized with default shape so it is never None or empty on startup
+selected_shape_info: Optional[dict] = None  # Holds shape info to flash gold on UI
 
 stop_event = threading.Event()
 
@@ -127,7 +122,7 @@ def thread_robot_server(robot_link: RobotLink):
 #MOUSE CLICK HANDLER (CLICK-TO-PICK)
 def on_mouse_click(event, mouse_x, mouse_y, flags, param):
     """Called by OpenCV whenever the user clicks the mouse on the video window."""
-    global selected_shape, selected_shape_info
+    global selected_shape_info
 
     if event == cv2.EVENT_LBUTTONDOWN:
         with shapes_lock:
@@ -142,7 +137,6 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param):
                 robot_command_queue.put(cmd)
 
                 with selected_shape_lock:
-                    selected_shape = s.shape
                     selected_shape_info = {
                         "shape": s.shape,
                         "bbox": s.bbox,
@@ -232,28 +226,27 @@ def main():
 
             # Draw Gold Selection Highlight if user clicked a shape
             with selected_shape_lock:
-                if selected_shape_info and selected_shape_info.get("expire_time", 0.0) > 0 and time.time() < selected_shape_info["expire_time"]:
+                if selected_shape_info and time.time() < selected_shape_info["expire_time"]:
                     bx, by, bw, bh = selected_shape_info["bbox"]
-                    if bw > 0 and bh > 0:
-                        cv2.rectangle(display_frame, (bx, by), (bx + bw, by + bh), (0, 215, 255), 4)
-                        cv2.putText(
-                            display_frame,
-                            f">> SENDING {selected_shape_info['shape'].upper()} TO ROBOT <<",
-                            (bx, max(30, by - 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7,
-                            (0, 215, 255),
-                            2,
-                            cv2.LINE_AA,
-                        )
-                elif selected_shape_info and time.time() >= selected_shape_info.get("expire_time", 0.0):
-                    selected_shape_info["expire_time"] = 0.0
+                    cv2.rectangle(display_frame, (bx, by), (bx + bw, by + bh), (0, 215, 255), 4)
+                    cv2.putText(
+                        display_frame,
+                        f">> SENDING {selected_shape_info['shape'].upper()} TO ROBOT <<",
+                        (bx, max(30, by - 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 215, 255),
+                        2,
+                        cv2.LINE_AA,
+                    )
+                elif selected_shape_info and time.time() >= selected_shape_info["expire_time"]:
+                    selected_shape_info = None
 
             # Render Status Banner at Top of GUI
             status_text = (
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
-                f"SELECTED: {selected_shape.upper()} | "
-                f"CLICK SHAPE OR PRESS [S/T/C/H/U/SPACE]"
+                f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
+                f"CLICK SHAPE OR PRESS [S/T/C/H] TO PICK"
             )
             banner_color = (0, 180, 0) if robot_link.connected else (0, 120, 255)
             cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], 45), (30, 30, 30), -1)
@@ -274,33 +267,14 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == 27:  # 'q' or ESC
                 break
-            elif key in (ord("s"), ord("t"), ord("c"), ord("h"), ord("u")):
-                key_map = {
-                    ord("s"): "Star",
-                    ord("t"): "Triangle",
-                    ord("c"): "Circle",
-                    ord("h"): "Hexagon",
-                    ord("u"): "Square",
-                }
+            elif key in (ord("s"), ord("t"), ord("c"), ord("h")):
+                key_map = {ord("s"): "Star", ord("t"): "Triangle", ord("c"): "Circle", ord("h"): "Hexagon"}
                 target_shape_name = key_map[key]
 
                 # Find matching detected shape and dispatch
                 for s in current_shapes:
                     if s.shape.lower() == target_shape_name.lower():
                         print(f"\n[HOTKEY] Selected {s.shape} at X={s.x_mm}, Y={s.y_mm}")
-                        robot_command_queue.put(s.to_robot_command())
-                        with selected_shape_lock:
-                            selected_shape = s.shape
-                            selected_shape_info = {
-                                "shape": s.shape,
-                                "bbox": s.bbox,
-                                "expire_time": time.time() + 1.5,
-                            }
-                        break
-            elif key in (32, 13):  # SPACE or ENTER to send currently selected shape
-                for s in current_shapes:
-                    if s.shape.lower() == selected_shape.lower():
-                        print(f"\n[TRIGGER] Selected {s.shape} at X={s.x_mm}, Y={s.y_mm}")
                         robot_command_queue.put(s.to_robot_command())
                         with selected_shape_lock:
                             selected_shape_info = {
