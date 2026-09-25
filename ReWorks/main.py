@@ -31,20 +31,7 @@ shapes_lock = threading.Lock()
 latest_shapes: List[DetectedShape] = []
 
 selected_shape_lock = threading.Lock()
-selected_shape: str = "Circle"
-selected_shape_info: Optional[dict] = {
-    "shape": "Circle",
-    "bbox": (0, 0, 0, 0),
-    "expire_time": 0.0,
-}
-
-# Module-level static frame fallback (ensures static_frame / STATIC_FRAME is always defined)
-script_dir = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(script_dir, "test.png")
-static_frame: Optional[np.ndarray] = cv2.imread(image_path) if os.path.exists(image_path) else None
-if static_frame is None:
-    static_frame = np.zeros((720, 1240, 3), dtype=np.uint8)
-STATIC_FRAME: np.ndarray = static_frame
+selected_shape_info: Optional[dict] = None  # Holds shape info to flash gold on UI
 
 stop_event = threading.Event()
 
@@ -183,12 +170,10 @@ def main():
         live_camera = None
 
     # Load fallback image
-    global static_frame, STATIC_FRAME
-    if static_frame is None:
-        static_frame = cv2.imread(image_path)
-    if static_frame is None:
-        static_frame = np.zeros((720, 1240, 3), dtype=np.uint8)
-    STATIC_FRAME = static_frame
+    static_frame = cv2.imread(image_path)
+    if static_frame is None and live_camera is None:
+        print(f"Error: Neither Basler camera nor '{image_path}' could be opened!")
+        return
 
     # 3. Launch Background Threads (1, 2, 3)
     t1 = threading.Thread(target=thread_ai_inference, args=(pipeline,), daemon=True)
@@ -222,7 +207,7 @@ def main():
                 if frame is None:
                     continue
             else:
-                frame = static_frame.copy() if static_frame is not None else STATIC_FRAME.copy()
+                frame = static_frame.copy()
                 time.sleep(0.03)  # ~30 FPS throttle for image simulation
 
             # Periodically (every 200ms) feed a snapshot to the AI thread
