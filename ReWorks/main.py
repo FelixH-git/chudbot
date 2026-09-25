@@ -36,7 +36,7 @@ selected_shape_info: Optional[dict] = None  # Holds shape info to flash gold on 
 stop_event = threading.Event()
 
 
-# THREAD 1: AI MODEL INFERENCE 
+# THREAD 1: AI MODEL INFERENCE
 def thread_ai_inference(pipeline: VisionPipeline):
     """Worker Thread: Continuously grabs frame snapshots and runs the ONNX model."""
     print("[Thread 1: AI Inference] Started.")
@@ -107,18 +107,9 @@ def thread_robot_server(robot_link: RobotLink):
         print(f"[Thread 3: Server Communication] Socket startup notice: {err}")
 
     while not stop_event.is_set():
-        if not robot_link.connected:
-            robot_link.accept_client(timeout=0.5)
-
         try:
             command = robot_command_queue.get(timeout=0.2)
         except queue.Empty:
-            continue
-
-        if not robot_link.connected:
-            print(f"[Thread 3] Robot not connected yet. Waiting to send: {command.strip()}")
-            robot_command_queue.put(command)
-            time.sleep(0.5)
             continue
 
         print(f"[Thread 3] Sending command to ABB Robot: {command.strip()}")
@@ -255,7 +246,7 @@ def main():
             status_text = (
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
                 f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
-                f"CLICK SHAPE OR PRESS [S/T/C/H/U] TO PICK"
+                f"CLICK SHAPE OR PRESS [S/T/C/H] TO PICK"
             )
             banner_color = (0, 180, 0) if robot_link.connected else (0, 120, 255)
             cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], 45), (30, 30, 30), -1)
@@ -276,14 +267,8 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == 27:  # 'q' or ESC
                 break
-            elif key in (ord("s"), ord("t"), ord("c"), ord("h"), ord("u")):
-                key_map = {
-                    ord("s"): "Star",
-                    ord("t"): "Triangle",
-                    ord("c"): "Circle",
-                    ord("h"): "Hexagon",
-                    ord("u"): "Square",
-                }
+            elif key in (ord("s"), ord("t"), ord("c"), ord("h")):
+                key_map = {ord("s"): "Star", ord("t"): "Triangle", ord("c"): "Circle", ord("h"): "Hexagon"}
                 target_shape_name = key_map[key]
 
                 # Find matching detected shape and dispatch

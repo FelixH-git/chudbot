@@ -1,6 +1,6 @@
 # Author Nils Wikström niwi0007
 """
-Vison pipeline for shape detection and robot corindate extraction 
+Vison pipeline for shape detection and robot corindate extraction
 arUco tag detection for real world calibraton (pixels -> mm )
 3 - head ONNX Neural Network (class + rotation + centroid)
 symetry awareness pick angle for robot gripper
@@ -8,7 +8,7 @@ symetry awareness pick angle for robot gripper
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
-import cv2 
+import cv2
 import numpy as np
 import onnxruntime as ort
 
@@ -26,16 +26,8 @@ class DetectedShape:
     bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
 
     def to_robot_command(self) -> str:
-        """Return comma-separated string expected by ABB RAPID: shape,x,y,angle"""
-        name_map = {
-            "Circle": "pcircle",
-            "Square": "psquare",
-            "Hexagon": "phexa",
-            "Star": "pstar",
-            "Triangle": "ptriangle",
-        }
-        shape_tag = name_map.get(self.shape, self.shape.lower())
-        return f"{shape_tag},{self.x_mm:.2f},{self.y_mm:.2f},{self.rz_deg:.2f}"
+        """Return the string expected by the ABB RAPID socket parser."""
+        return f"SHAPE={self.shape};X={self.x_mm};Y={self.y_mm};RZ={self.rz_deg};END\r\n"
 
     def toRobortCommand(self) -> str:
         return self.to_robot_command()
@@ -114,11 +106,11 @@ class VisionPipeline:
 
     def updateHomography(self, frame_bgr: np.ndarray) -> bool:
         return self.update_homography(frame_bgr)
-    
+
 
     def pixel_to_mm(self,px:float,py:float,) -> Optional[Tuple[float,float]]:
         """
-        Transform a pixel x,y cord to ORL workspace mm 
+        Transform a pixel x,y cord to ORL workspace mm
         """
 
         if self.homography_matrix is None:
