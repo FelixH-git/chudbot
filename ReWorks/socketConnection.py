@@ -15,40 +15,55 @@ class RobotLink:
         return self.clientSocket is not None
 
     def start(self):
-        self.serverSocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-
+        self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # Allows the server to reuse the same address and port shortly after restarting.
-        self.serverSocket.setsockopt(socket.SOL_SOCKET, 
-                                     socket.SO_REUSEADDR,
-                                     1)
-        
-        self.serverSocket.bind((self.host,self.port))
+        self.serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.serverSocket.bind((self.host, self.port))
         self.serverSocket.listen(1)
+        print(f"Waiting for the robot to connect to {self.host}:{self.port} ...")
+        self.accept_client(timeout=1.0)
+        return self
 
-        print(f"waiting for the robot to connect to {self.host}:{self.port}")
+    def accept_client(self, timeout: float = 1.0):
+        """Accepts a client connection if none is currently connected."""
+        if self.serverSocket is None or self.connected:
+            return
+        self.serverSocket.settimeout(timeout)
         try:
             self.clientSocket, self.clientIp = self.serverSocket.accept()
-        except OSError:
-            return self
-        print(f"Robot at address {self.clientIp} connected")
+            # Set client socket back to blocking mode with a timeout for sends
+            self.clientSocket.settimeout(5.0)
+            print(f"Robot at address {self.clientIp} connected")
+        except socket.timeout:
+            pass
+        except OSError as e:
+            pass
 
-
-    def send(self,message):
+    def send(self, message: str):
         if not self.connected:
-            print("robot is not connected")
+            print("Robot is not connected - command queued or dropped.")
             return
-        self.clientSocket.sendall(message.encode("utf-8"))
-        print(f"sent {message} to robot")
+        try:
+            self.clientSocket.sendall(message.encode("utf-8"))
+            print(f"Sent '{message}' to robot")
+        except Exception as e:
+            print(f"Error sending to robot ({e}), marking disconnected.")
+            if self.clientSocket is not None:
+                try:
+                    self.clientSocket.close()
+                except OSError:
+                    pass
+            self.clientSocket = None
 
     def close(self):
-            for sock in (self.clientSocket,self.serverSocket):
-                if sock is not None:
-                    try:
-                        sock.close()
-                    except OSError:
-                        pass
-            self.clientSocket = None
-            self.serverSocketr = None
+        for sock in (self.clientSocket, self.serverSocket):
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+        self.clientSocket = None
+        self.serverSocket = None
  
 
 

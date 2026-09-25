@@ -26,8 +26,16 @@ class DetectedShape:
     bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
 
     def to_robot_command(self) -> str:
-        """Return the string expected by the ABB RAPID socket parser."""
-        return f"SHAPE={self.shape};X={self.x_mm};Y={self.y_mm};RZ={self.rz_deg};END\r\n"
+        """Return comma-separated string expected by ABB RAPID: shape,x,y,angle"""
+        name_map = {
+            "Circle": "pcircle",
+            "Square": "psquare",
+            "Hexagon": "phexa",
+            "Star": "pstar",
+            "Triangle": "ptriangle",
+        }
+        shape_tag = name_map.get(self.shape, self.shape.lower())
+        return f"{shape_tag},{self.x_mm:.2f},{self.y_mm:.2f},{self.rz_deg:.2f}"
 
     def toRobortCommand(self) -> str:
         return self.to_robot_command()
