@@ -1,0 +1,52 @@
+MODULE ServerCommuncatio(SYSMODULE)
+
+    VAR socketdev clientSocket;
+    VAR socketdev serverSocket;
+    VAR socketstatus status;
+    VAR socketdev robotClient;
+        
+    !######## Robot as client######################    
+    PROC RobotAsClientConnect()
+        VAR num retry_no := 0;
+        SocketCreate robotClient;
+        ! IMPORTANT: Must match the Raspberry Pi IP address!
+        SocketConnect robotClient, "192.168.125.201", 5000;
+        TPWrite "I LIVE!";
+    ERROR
+        IF ERRNO = ERR_SOCK_TIMEOUT THEN
+            IF retry_no < 5 THEN
+                WaitTime 1;
+                retry_no := retry_no + 1;
+                RETRY;
+            ELSE
+                RAISE;
+            ENDIF
+        ENDIF
+    ENDPROC  
+       
+    PROC RobotClientCloseAndDisconnect ()
+        SocketClose robotClient;
+        TPWrite "And i DIE..... robotClient: Connection Closed .";
+    ENDPROC   
+      
+    PROC RobotClienSendMessage(string Message)
+        IF SocketGetStatus(robotClient) = SOCKET_CONNECTED THEN
+            SocketSend robotClient \Str:=Message;
+        ENDIF    
+    ENDPROC
+
+    ! Fixed to prevent infinite empty strings when disconnected
+    FUNC String RobotClientReciveMessage()
+        VAR string RobotClienReceivedString := "";
+        
+        IF SocketGetStatus(robotClient) <> SOCKET_CONNECTED THEN
+            TPWrite "ERROR: Socket is disconnected! Reconnect needed.";
+            WaitTime 2.0; ! Prevents the FlexPendant from freezing
+            RETURN "";
+        ENDIF  
+        
+        SocketReceive robotClient \Str:=RobotClienReceivedString \Time:=WAIT_MAX;
+        RETURN RobotClienReceivedString;
+    ENDFUNC 
+
+ENDMODULE

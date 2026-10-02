@@ -1,0 +1,51 @@
+MODULE MainModule
+
+    VAR ShapeJob currentJob;
+    VAR string servermMessage;
+    VAR string clinetMessage;
+    VAR bool connected := FALSE;
+
+    PROC main()
+        
+        ! 1. ACTUALLY CONNECT TO PYTHON FIRST
+        RobotAsClientConnect;
+        
+        WHILE TRUE DO
+            servermMessage := RobotClientReciveMessage();
+            
+            IF ParseJobString(servermMessage, currentJob) THEN
+                
+                IF currentJob.job_Shape = "exit" THEN 
+                    clinetMessage := "time TO DIE";
+                    RobotClienSendMessage(clinetMessage);
+                    RobotClientCloseAndDisconnect;
+                    EXIT;
+                ENDIF
+                
+                ! 1. Inherit safe downward wrist angle from the Aruco area
+                ! (If you haven't taught pArucoHover yet, use pHome for now)
+                shape := pArucoHover; 
+                
+                ! 2. Apply the AI Coordinates to the X and Y
+                shape.trans.x := currentJob.x_val;
+                shape.trans.y := currentJob.y_val;
+                
+                ! 3. Set the pick height (Z). Start at 15mm so it doesn't crash!
+                shape.trans.z := 15.0; 
+                
+                ! (Rotation is intentionally skipped here so it keeps the downward angle)
+                
+                ! 4. Call the sorting module
+                move_to_shape currentJob.job_Shape;
+                
+            ELSE
+                IF servermMessage <> "" THEN
+                    TPWrite "parse failed " + servermMessage; 
+                ENDIF
+            ENDIF
+
+        ENDWHILE
+        
+    ENDPROC
+
+ENDMODULE
