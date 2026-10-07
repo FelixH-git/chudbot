@@ -27,7 +27,7 @@ class DetectedShape:
 
     def to_robot_command(self) -> str:
         """Return the string expected by the ABB RAPID socket parser."""
-        return f"SHAPE={self.shape};X={self.x_mm};Y={self.y_mm};RZ={self.rz_deg};END\r\n"
+        return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={self.rz_deg:.1f};END\r\n"
 
     def toRobortCommand(self) -> str:
         return self.to_robot_command()
