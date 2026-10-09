@@ -1,0 +1,205 @@
+MODULE dataParser
+
+    ! The RECORD is defined here so every module knows what a ShapeJob is.
+    RECORD ShapeJob
+        string job_Shape;
+        num x_val;
+        num y_val;
+        num rz_val;
+    ENDRECORD
+
+    ! The parsing function with the two Safety Shields to prevent ChPos errors
+    FUNC bool ParseJobString(string raw_message, INOUT ShapeJob parsed_job)
+        VAR num search_start := 1;
+        VAR num semi_idx;
+        VAR num eq_idx;
+        VAR string TOKEN;
+        VAR string key;
+        VAR string val;
+        VAR bool got_shape := FALSE;
+        VAR bool got_x := FALSE;
+        VAR bool got_y := FALSE;
+        VAR bool got_rz := FALSE;
+        VAR num tpm_num;
+        
+        TPWrite "RECEIVED: " + raw_message;
+        
+        WHILE search_start <= StrLen(raw_message) DO
+            semi_idx := StrFind(raw_message, search_start, ";");
+            IF semi_idx = 0 THEN
+                semi_idx := StrLen(raw_message) + 1;
+            ENDIF
+            
+            ! SHIELD 1: Ensure there is data between the semicolons
+            IF (semi_idx - search_start) > 0 THEN
+                TOKEN := StrPart(raw_message, search_start, semi_idx - search_start);
+                
+                eq_idx := StrFind(TOKEN, 1, "=");
+                
+                ! SHIELD 2: Ensure '=' exists, isn't the first char, and isn't the last char
+                IF (eq_idx > 1) AND (eq_idx < StrLen(TOKEN)) THEN
+                    key := StrPart(TOKEN, 1, eq_idx - 1);
+                    val := StrPart(TOKEN, eq_idx + 1, StrLen(TOKEN) - eq_idx);
+                    
+                    IF key = "SHAPE" THEN 
+                        parsed_job.job_Shape := val;
+                        got_shape := TRUE;
+                    ELSEIF key = "X" THEN 
+                        got_x := StrToVal(val, tpm_num);
+                        parsed_job.x_val := tpm_num;
+                    ELSEIF key = "Y" THEN 
+                        got_y := StrToVal(val, tpm_num);
+                        parsed_job.y_val := tpm_num;
+                    ELSEIF key = "RZ" THEN 
+                        got_rz := StrToVal(val, tpm_num);
+                        parsed_job.rz_val := tpm_num;
+                    ENDIF
+                ENDIF
+            ENDIF   
+            
+            search_start := semi_idx + 1;
+        ENDWHILE
+        
+        RETURN got_shape AND got_x AND got_y AND got_rz;
+    ENDFUNC
+ENDMODULE
+
+MODULE MainModule
+
+    VAR ShapeJob currentJob;
+    VAR string servermMessage;
+    VAR string clinetMessage;
+    VAR bool connected := FALSE;
+    CONST robtarget pCircle10:=[[104.28,67.70,-0.55],[0.0125317,0.0852742,-0.996153,0.0158094],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pSquare10:=[[155.49,8.33,6.62],[0.0125343,0.0852824,-0.996152,0.0158167],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pStar10:=[[205.88,-52.51,7.56],[0.0125588,0.0852988,-0.996151,0.0158188],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pHexagon10:=[[214.63,57.12,7.92],[0.0126341,0.0853539,-0.996144,0.0158744],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+
+    PROC main()
+        
+!        ! 1. ACTUALLY CONNECT TO PYTHON FIRST
+!        RobotAsClientConnect;
+MoveL pCircle, v1000, fine, tsuck\WObj:=wobjAiPlaceTray;
+MoveL pSquare, v1000, fine, tsuck\WObj:=wobjAiPlaceTray;
+MoveL pStar, v1000, fine, tsuck\WObj:=wobjAiPlaceTray;
+MoveL pHexagon, v1000, fine, tsuck\WObj:=wobjAiPlaceTray;
+MoveL pTriangle, v1000, fine, tsuck\WObj:=wobjAiPlaceTray;
+        
+!        WHILE TRUE DO
+!            servermMessage := RobotClientReciveMessage();
+            
+!            IF ParseJobString(servermMessage, currentJob) THEN
+                
+!                IF currentJob.job_Shape = "exit" THEN 
+!                    clinetMessage := "time TO DIE";
+!                    RobotClienSendMessage(clinetMessage);
+!                    RobotClientCloseAndDisconnect;
+!                    EXIT;
+!                ENDIF
+                
+!                ! 1. Inherit safe downward wrist angle from the Aruco area
+!                ! (If you haven't taught pArucoHover yet, use pHome for now)
+!                shape := pHome; 
+                
+!                ! 2. Apply the AI Coordinates to the X and Y
+!                shape.trans.x := currentJob.x_val;
+!                shape.trans.y := currentJob.y_val;
+                
+!                ! 3. Set the pick height (Z). Start at 15mm so it doesn't crash!
+!                shape.trans.z := 15.0; 
+!                !shape.rot := OrientZYX(currentJob.rz_val,0,0);
+!                PrintRobtarget(shape);
+                
+!                ! (Rotation is intentionally skipped here so it keeps the downward angle)
+                
+!                ! 4. Call the sorting module
+!                move_to_shape currentJob.job_Shape;
+                
+!            ELSE
+!                IF servermMessage <> "" THEN
+!                    TPWrite "parse failed " + servermMessage; 
+!                ENDIF
+!            ENDIF
+
+!        ENDWHILE
+
+    
+        
+    ENDPROC
+    
+    PROC PrintRobtarget(robtarget p)
+    TPWrite "X: " + NumToStr(p.trans.x, 2);
+    TPWrite "Y: " + NumToStr(p.trans.y, 2);
+    TPWrite "Z: " + NumToStr(p.trans.z, 2);
+    ENDPROC
+    
+    proc suckOn()
+        SetDO doValve2, 1;
+    ENDPROC
+    
+    PROC suckOff()
+        SetDO doValve2, 0;
+    ENDPROC
+    
+    PROC waitforOK(string action)
+        TPWrite action;
+        WaitDI diOkButton, 1;    
+        WaitDI diOkButton, 0;
+        TPWrite "Performing " + action;
+    ENDPROC
+    
+    
+ENDMODULE
+
+MODULE moveToShape
+    PROC move_to_shape(string shape_input)
+            waitforOK("");
+            MoveL phome, v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! 1. Safe Approach: Hover 100mm directly above the shape
+            !MoveL Offs(shape, 0, 0, 100), v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! 2. Go down to pick
+            MoveL shape, v50 , fine, tsuck\WObj:=wobjAruco;
+            suckOn;
+            WaitTime 1.0;
+            
+            ! 3. Safe Depart: Lift straight back up 100mm
+           ! MoveL Offs(shape, 0, 0, 100), v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! Move to tray approach
+            MoveL pApporach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+
+            ! Sorting logic
+            IF shape_input = "Star" THEN
+                MoveL pStar, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime 1.0;
+                suckOff;
+            ELSEIF shape_input = "Square" THEN
+                MoveL pSquare, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime 1.0;
+                suckOff;
+            ELSEIF shape_input = "Hexagon" THEN
+                MoveL pHexagon, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime 1.0;
+                suckOff;
+            ELSEIF shape_input = "Circle" THEN
+                MoveL pCircle, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime 1.0;
+                suckOff;
+            ELSEIF shape_input = "Triangle" THEN
+                MoveL pTriangle, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
+                WaitTime 1.0;
+                suckOff;
+            ENDIF
+            
+            ! Move back to safe approach over tray
+            MoveL pApporach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+    ENDPROC
+    
+    
+    
+    
+ENDMODULE
+
+
