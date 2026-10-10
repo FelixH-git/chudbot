@@ -1,0 +1,65 @@
+MODULE dataParser
+
+    ! The RECORD is defined here so every module knows what a ShapeJob is.
+    RECORD ShapeJob
+        string job_Shape;
+        num x_val;
+        num y_val;
+        num rz_val;
+    ENDRECORD
+
+    ! The parsing function with the two Safety Shields to prevent ChPos errors
+    FUNC bool ParseJobString(string raw_message, INOUT ShapeJob parsed_job)
+        VAR num search_start := 1;
+        VAR num semi_idx;
+        VAR num eq_idx;
+        VAR string TOKEN;
+        VAR string key;
+        VAR string val;
+        VAR bool got_shape := FALSE;
+        VAR bool got_x := FALSE;
+        VAR bool got_y := FALSE;
+        VAR bool got_rz := FALSE;
+        VAR num tpm_num;
+        
+        TPWrite "RECEIVED: " + raw_message;
+        
+        WHILE search_start <= StrLen(raw_message) DO
+            semi_idx := StrFind(raw_message, search_start, ";");
+            IF semi_idx = 0 THEN
+                semi_idx := StrLen(raw_message) + 1;
+            ENDIF
+            
+            ! SHIELD 1: Ensure there is data between the semicolons
+            IF (semi_idx - search_start) > 0 THEN
+                TOKEN := StrPart(raw_message, search_start, semi_idx - search_start);
+                
+                eq_idx := StrFind(TOKEN, 1, "=");
+                
+                ! SHIELD 2: Ensure '=' exists, isn't the first char, and isn't the last char
+                IF (eq_idx > 1) AND (eq_idx < StrLen(TOKEN)) THEN
+                    key := StrPart(TOKEN, 1, eq_idx - 1);
+                    val := StrPart(TOKEN, eq_idx + 1, StrLen(TOKEN) - eq_idx);
+                    
+                    IF key = "SHAPE" THEN 
+                        parsed_job.job_Shape := val;
+                        got_shape := TRUE;
+                    ELSEIF key = "X" THEN 
+                        got_x := StrToVal(val, tpm_num);
+                        parsed_job.x_val := tpm_num;
+                    ELSEIF key = "Y" THEN 
+                        got_y := StrToVal(val, tpm_num);
+                        parsed_job.y_val := tpm_num;
+                    ELSEIF key = "RZ" THEN 
+                        got_rz := StrToVal(val, tpm_num);
+                        parsed_job.rz_val := tpm_num;
+                    ENDIF
+                ENDIF
+            ENDIF   
+            
+            search_start := semi_idx + 1;
+        ENDWHILE
+        
+        RETURN got_shape AND got_x AND got_y AND got_rz;
+    ENDFUNC
+ENDMODULE

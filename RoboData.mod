@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream:RoboData.mod
 MODULE RoboData
    
 
@@ -22,4 +23,31 @@ MODULE RoboData
     
 
     
+=======
+MODULE RoboData
+    ! --- Tool and Work Objects ---
+    TASK PERS tooldata tsuck:=[TRUE,[[-85.9672,-29.7846,173.875],[1,0,0,0]],[1.1,[0,20,25],[1,0,0,0],0,0,0]];
+    TASK PERS wobjdata wobj1:=[FALSE,TRUE,"",[[959.838,-291.657,795.046],[0.999978,-0.00504122,0.00423326,6.27363E-05]],[[0,0,0],[1,0,0,0]]];
+    TASK PERS wobjdata wobjAiPlaceTray:=[FALSE,TRUE,"",[[1120.9,-337.702,812.948],[0.999903,-0.00242754,-0.00479551,-0.0128859]],[[0,0,0],[1,0,0,0]]];
+    TASK PERS wobjdata wobjAruco:=[FALSE,TRUE,"",[[1194.33,254.193,808.932],[2.58192E-05,-0.712393,-0.701781,-7.39448E-05]],[[0,0,0],[1,0,0,0]]];
+
+    ! --- Dynamic Target (updated by Python) ---
+    PERS robtarget shape:=[[42.6,-82.2,0],[0.57468,-0.00195664,-0.0210695,-0.818105],[0,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+
+    ! --- Static Targets ---
+    CONST robtarget pHome:=[[-195.90,-46.65,-109.06],[0.57468,-0.00195664,-0.0210695,-0.818105],[0,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    
+    ! Create this point manually by hovering over the Aruco board and saving it!
+    CONST robtarget pArucoHover:=[[0,0,0],[0,0,0,0],[0,0,0,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
+    
+    CONST robtarget pApporach:=[[73.06,104.91,75.59],[0.0120198,-0.164888,0.986072,-0.0181533],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    
+    ! --- Tray placements for wobjAiPlaceTray ---
+    CONST robtarget pCircle:=[[38.96,38.60,8.91],[0.0120699,-0.16481,0.986085,-0.0181159],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pSquare:=[[45.22,166.83,9.46],[0.0120645,-0.164816,0.986084,-0.0181132],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pStar:=[[97.97,109.11,8.67],[0.012047,-0.164824,0.986083,-0.0181058],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pHexagon:=[[146.84,49.68,7.93],[0.0120609,-0.164812,0.986085,-0.0181157],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pTriangle:=[[157.18,159.63,8.35],[0.0120758,-0.164809,0.986085,-0.0181194],[-1,-1,-1,0],[9E+09,9E+09,9E+09,9E+09,9E+09,9E+09]];
+        
+>>>>>>> Stashed changes:RobotCode/RoboData.mod
 ENDMODULE
