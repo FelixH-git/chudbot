@@ -166,10 +166,12 @@ def main() -> None:
     print("\n=========================================================")
     print(" SYSTEM RUNNING (4 threads)")
     print(" - CLICK a shape to pick it.  HOTKEYS: [S/T/C/H]")
+    print(" - Press [M] to show/hide the wobjAruco marker frame.")
     print(" - Press [Q] to exit.")
     print("=========================================================\n")
 
     last_snapshot = 0.0
+    show_marker = True  # [M] toggles the wobjAruco marker-frame overlay
     try:
         while not stop_event.is_set():
             if live_camera is not None and live_camera.isOpen:
@@ -191,6 +193,10 @@ def main() -> None:
 
             display = pipeline.draw_hud(frame, current_shapes)
 
+            # ArUco marker frame (corners + wobjAruco axes), toggled with [M].
+            if show_marker:
+                display = pipeline.draw_marker_frame(display)
+
             # Gold frame around the last clicked shape.
             with selected_shape_lock:
                 if selected_shape_info and time.time() < selected_shape_info["expire_time"]:
@@ -208,7 +214,7 @@ def main() -> None:
             status = (
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
                 f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
-                f"CLICK OR PRESS [S/T/C/H] TO PICK"
+                f"[M] MARKER | CLICK OR [S/T/C/H] TO PICK"
             )
             banner = (0, 180, 0) if robot_link.connected else (0, 120, 255)
             cv2.rectangle(display, (0, 0), (display.shape[1], 45), (30, 30, 30), -1)
@@ -219,6 +225,8 @@ def main() -> None:
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
+            if key == ord("m"):
+                show_marker = not show_marker
             if key in (ord("s"), ord("t"), ord("c"), ord("h")):
                 wanted = {ord("s"): "Star", ord("t"): "Triangle", ord("c"): "Circle", ord("h"): "Hexagon"}[key]
                 for s in current_shapes:

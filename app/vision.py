@@ -167,25 +167,33 @@ class VisionPipeline:
         print(f"[VISION] Loaded {self.model_path}")
 
     # ── Calibration: pixels -> mm ────────────────────────────────────────────
+    def detect_marker(self, frame_bgr: np.ndarray):
+        """Detect every ArUco marker in the frame; returns OpenCV (corners, ids)."""
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        if self.aruco_detector is not None:
+            corners, ids, _ = self.aruco_detector.detectMarkers(gray)
+        else:
+            corners, ids, _ = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.aruco_params)
+        return corners, ids
+
+    def _homography_from_corner(self, corner_px: np.ndarray) -> np.ndarray:
+        """Pixel -> mm homography for one marker, with (0, 0) at ORIGIN_CORNER."""
+        pts_px = np.roll(corner_px.reshape(4, 2), -ORIGIN_CORNER, axis=0).astype(np.float64)
+        s = self.marker_size_mm
+        pts_mm = np.array([[0, 0], [s, 0], [s, s], [0, s]], dtype=np.float64)
+        H, _ = cv2.findHomography(pts_px, pts_mm)
+        return H
+
     def update_homography(self, frame_bgr: np.ndarray) -> bool:
         """Find the ArUco marker and compute the pixel -> mm homography.
 
         The origin (0, 0) is the marker corner ORIGIN_CORNER. Returns True if a
         marker was found.
         """
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        if self.aruco_detector is not None:
-            corners, ids, _ = self.aruco_detector.detectMarkers(gray)
-        else:
-            corners, ids, _ = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.aruco_params)
+        corners, ids = self.detect_marker(frame_bgr)
         if ids is None or len(ids) == 0:
             return False
-
-        # Rotate the corner order so ORIGIN_CORNER becomes point 0.
-        pts_px = np.roll(corners[0].reshape(4, 2), -ORIGIN_CORNER, axis=0).astype(np.float64)
-        s = self.marker_size_mm
-        pts_mm = np.array([[0, 0], [s, 0], [s, s], [0, s]], dtype=np.float64)
-        self.homography_matrix, _ = cv2.findHomography(pts_px, pts_mm)
+        self.homography_matrix = self._homography_from_corner(corners[0])
         return True
 
     # Alias kept for backwards compatibility with the old scripts.
@@ -371,6 +379,80 @@ class VisionPipeline:
             if obj is not None:
                 detections.append(obj)
         return detections
+
+    def draw_marker_frame(
+        self,
+        frame_bgr: np.ndarray,
+        axis_len_mm: float = 80.0,
+        grid_step_mm: float = 50.0,
+    ) -> np.ndarray:
+        """Overlay the marker frame the robot's wobjAruco must match.
+
+        Shows, so the frame can be taught by eye:
+          * all four marker corners labelled with their OpenCV index 0..3
+            (0=TL, 1=TR, 2=BR, 3=BL in the marker's own frame),
+          * ORIGIN_CORNER highlighted = the point to teach as wobjAruco's origin,
+          * +X (green) and +Y (blue) arrows = the wobjAruco axis directions,
+          * a light 50 mm grid for scale.
+
+        The corner -> mm mapping matches update_homography exactly, so what is
+        drawn is what the pipeline actually uses for X/Y in mm.
+        """
+        annotated = frame_bgr.copy()
+        s = self.marker_size_mm
+
+        corners, ids = self.detect_marker(frame_bgr)
+        if ids is None or len(ids) == 0:
+            cv2.putText(
+                annotated, "ArUco marker: NOT FOUND", (20, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA,
+            )
+            return annotated
+
+        pts = corners[0].reshape(4, 2).astype(np.float64)
+
+        # Marker mm -> pixels, using the same convention as update_homography.
+        H_inv = np.linalg.inv(self._homography_from_corner(corners[0]))
+        o_px = cv2.perspectiveTransform(np.array([[[0.0, 0.0]]]), H_inv).reshape(2)
+        x_px = cv2.perspectiveTransform(np.array([[[axis_len_mm, 0.0]]]), H_inv).reshape(2)
+        y_px = cv2.perspectiveTransform(np.array([[[0.0, axis_len_mm]]]), H_inv).reshape(2)
+
+        # Light reference grid inside the marker square.
+        if grid_step_mm and grid_step_mm > 0:
+            for i in range(int(round(s / grid_step_mm)) + 1):
+                mm = i * grid_step_mm
+                e = cv2.perspectiveTransform(
+                    np.array([[[mm, 0.0]], [[mm, s]], [[0.0, mm]], [[s, mm]]]), H_inv
+                ).reshape(4, 2).astype(np.int32)
+                cv2.line(annotated, tuple(e[0]), tuple(e[1]), (170, 170, 170), 1, cv2.LINE_AA)
+                cv2.line(annotated, tuple(e[2]), tuple(e[3]), (170, 170, 170), 1, cv2.LINE_AA)
+
+        # Marker outline + corner index labels.
+        cv2.polylines(annotated, [pts.astype(np.int32)], True, (255, 200, 0), 2, cv2.LINE_AA)
+        for i, (px, py) in enumerate(pts):
+            is_origin = i == ORIGIN_CORNER
+            color = (0, 215, 255) if is_origin else (255, 255, 255)
+            cv2.circle(annotated, (int(px), int(py)), 7 if is_origin else 4, color, -1)
+            cv2.putText(
+                annotated, str(i), (int(px) + 9, int(py) - 9),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA,
+            )
+
+        # Marker-frame axes = wobjAruco X and Y.
+        o = tuple(o_px.astype(int))
+        cv2.arrowedLine(annotated, o, tuple(x_px.astype(int)), (0, 255, 0), 3, cv2.LINE_AA, 0, 0.15)
+        cv2.arrowedLine(annotated, o, tuple(y_px.astype(int)), (255, 0, 0), 3, cv2.LINE_AA, 0, 0.15)
+        cv2.putText(annotated, f"+X ({axis_len_mm:.0f}mm)", (int(x_px[0]) + 10, int(x_px[1])),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(annotated, f"+Y ({axis_len_mm:.0f}mm)", (int(y_px[0]) + 10, int(y_px[1])),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(
+            annotated,
+            f"ORIGIN = corner {ORIGIN_CORNER} -> teach as wobjAruco (0,0). Marker {s:.0f}mm",
+            (int(o_px[0]) + 12, int(o_px[1]) + 28),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 215, 255), 2, cv2.LINE_AA,
+        )
+        return annotated
 
     # ── Drawing ──────────────────────────────────────────────────────────────
     def ghost_outline(self, obj: DetectedShape) -> Optional[np.ndarray]:
