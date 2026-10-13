@@ -1,4 +1,5 @@
 # Author Nils Wikström niwi0007
+"""TCP-server som roboten (ABB) ansluter till. Skickar pick-kommandon som text."""
 import socket
 
 class RobotLink:
@@ -9,7 +10,7 @@ class RobotLink:
         self.clientSocket = None
         self.clientIp = None
 
-    # create a read only property calle connected, so this fucntion is a prop we can use to see if the robot is conncted
+    # Read-only property: True om roboten är ansluten
     @property
     def connected(self):
         return self.clientSocket is not None
@@ -17,7 +18,7 @@ class RobotLink:
     def start(self):
         self.serverSocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
-        # Allows the server to reuse the same address and port shortly after restarting.
+        # Låter servern använda samma adress och port direkt efter en omstart
         self.serverSocket.setsockopt(socket.SOL_SOCKET,
                                      socket.SO_REUSEADDR,
                                      1)

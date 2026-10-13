@@ -1,9 +1,9 @@
 """
-This file can be run on its own "python camera.py"
+Basler-kameran. Filen kan köras själv för att testa kameran: python camera.py
 """
 
 from typing import Optional
-import numpy as np 
+import numpy as np
 
 try:
     from pypylon import pylon
@@ -12,13 +12,12 @@ except ImportError:
     PYPYLON_AVAILABLE = False
 
 class BaslerCamera:
-    """Manages connection and configuareion and frame grabbing from the basler camera"""
+    """Ansluter till Basler-kameran, ställer in den och hämtar frames."""
     def __init__(self,timeoutMs:int =5000):
         if not PYPYLON_AVAILABLE:
             raise ImportError(
                 "pypylon not wokring"
             )
-
         self.timeoutMs = timeoutMs
         self.camera: Optional[pylon.InstantCamera] = None
         self.converter = pylon.ImageFormatConverter()
@@ -29,18 +28,18 @@ class BaslerCamera:
     @property
     def isOpen(self) -> bool:
         return self.camera is not None and self.camera.IsOpen()
-    
+
     def open(self) -> None:
-        """finds and connects to the first available basler camera"""
+        """Hittar och ansluter till den första Basler-kameran."""
         if self.isOpen:
             return
 
         tl_factory = pylon.TlFactory.GetInstance()
         devices = tl_factory.EnumerateDevices()
-        if not devices: 
+        if not devices:
             raise RuntimeError("NO CAMERA FOUND!!!!!!!!!!!")
 
-        # connect to first detected camera
+        # anslut till den första kameran som hittas
         self.camera = pylon.InstantCamera(tl_factory.CreateFirstDevice())
         self.camera.Open()
 
@@ -51,13 +50,11 @@ class BaslerCamera:
 
     def grabFrame(self) -> Optional[np.ndarray]:
         """
-        Grabs the latest frame as an RGB numpy array (openCV format)
-        return : None if grabbing is times out
+        Hämtar den senaste framen som en BGR numpy-array OpenCV-formatet.
+        Returnerar None om det tar för lång tid (timeout).
         """
-
         if not self.isOpen or not self.camera.IsGrabbing():
             return None
-
         try:
             grabRes = self.camera.RetrieveResult(
                 self.timeoutMs,
@@ -74,7 +71,7 @@ class BaslerCamera:
             print(f"[CAMERA] errror grabbing frame {e}")
 
     def close(self) -> None:
-        """Safely stops grabbing and releases the camera hardware."""
+        """Stoppar kameran på ett säkert sätt."""
         if self.camera is not None:
             if self.camera.IsGrabbing():
                 self.camera.StopGrabbing()
@@ -105,11 +102,11 @@ if __name__ == "__main__":
                 frame = cam.grabFrame()
                 if frame is None:
                     continue
-                # Calculate real-time FPS
+                # Räkna ut FPS (utjämnat)
                 current_time = time.time()
                 fps = 0.9 * fps + 0.1 * (1.0 / (current_time - prev_time))
                 prev_time = current_time
-                # Display resolution and FPS on the image
+                # Visa upplösning och FPS på bilden
                 h, w = frame.shape[:2]
                 cv2.putText(
                     frame,

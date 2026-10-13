@@ -1,9 +1,9 @@
 # Author Nils Wikström niwi0007
 """
-Vison pipeline for shape detection and robot corindate extraction
-arUco tag detection for real world calibraton (pixels -> mm )
-3 - head ONNX Neural Network (class + rotation + centroid)
-symetry awareness pick angle for robot gripper
+Första versionen av vision pipeline (används av main.py). Den nya är vision_v2.py.
+- ArUco-markören kalibrerar bilden (pixlar -> mm).
+- ONNX-nätverk med 3 heads: class, rotation och centre.
+- Vinkeln för gripen räknas ut med formens symmetri.
 """
 
 from dataclasses import dataclass
@@ -15,7 +15,7 @@ import onnxruntime as ort
 
 @dataclass
 class DetectedShape:
-    """Stores all information about a detected shape ready for the ABB robot."""
+    """All information om en hittad form, redo att skickas till ABB-roboten."""
     shape: str
     x_mm: float
     y_mm: float
@@ -26,7 +26,7 @@ class DetectedShape:
     bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
 
     def to_robot_command(self) -> str:
-        """Return the string expected by the ABB RAPID socket parser."""
+        """Texten som RAPID-koden på roboten läser från socketen."""
         return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={self.rz_deg:.1f};END\r\n"
 
     def toRobortCommand(self) -> str:
@@ -53,11 +53,11 @@ class VisionPipeline:
         self.target_shapes = target_shapes or ["Hexagon", "Triangle", "Circle", "Square", "Star"]
         self.homography_matrix: Optional[np.ndarray] = None
 
-        # Normalize constants used during model training
+        # Normaliseringen som användes i training (ImageNet)
         self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
-        # ArUco marker detection (DICT_5X5_100)
+        # ArUco-detektering (DICT_5X5_100)
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100)
         self.aruco_params = cv2.aruco.DetectorParameters()
         if hasattr(cv2.aruco, "ArucoDetector"):
@@ -65,7 +65,7 @@ class VisionPipeline:
         else:
             self.aruco_detector = None
 
-        # ONNX inference
+        # Ladda ONNX-modellen
         session_opts = ort.SessionOptions()
         session_opts.intra_op_num_threads = 4
         session_opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
@@ -78,8 +78,8 @@ class VisionPipeline:
 
     def update_homography(self, frame_bgr: np.ndarray) -> bool:
         """
-        Detects ArUco marker and computes the homography matrix (pixels -> mm).
-        Returns True if marker is detected.
+        Hittar ArUco-markören och räknar ut homografin (pixlar -> mm).
+        Returnerar True om markören hittades.
         """
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         if self.aruco_detector is not None:
@@ -110,7 +110,7 @@ class VisionPipeline:
 
     def pixel_to_mm(self,px:float,py:float,) -> Optional[Tuple[float,float]]:
         """
-        Transform a pixel x,y cord to ORL workspace mm
+        Pixel (x, y) -> mm på bordet.
         """
 
         if self.homography_matrix is None:
@@ -133,54 +133,54 @@ class VisionPipeline:
         pad_frac: float = 0.25,
     ) -> List[Tuple[Tuple[int, int, int, int], np.ndarray]]:
         """
-        Applies HSV color masking to black-out the background (matching dataset/objects),
-        filters out workspace boundaries / robot arm, and crops ROIs with 25% padding.
+        Gör bakgrunden svart med en HSV-färgmask (som i datasetet), tar bort saker vid kanterna
+        (balkar / robotarm) och klipper ut en crop per form med 25 % padding.
         """
         h_img, w_img = frame_bgr.shape[:2]
 
-        # 1. HSV color filter: keeps colored shapes, sets table/shadows to black
+        # 1. HSV-färgfilter: behåller färgade former, bord och skuggor blir svarta
         hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
         lower_color = np.array([0, 50, 50])
         upper_color = np.array([179, 255, 255])
         mask = cv2.inRange(hsv, lower_color, upper_color)
 
-        # 2. Smooth out noise
+        # 2. Ta bort brus
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-        # 3. Mask out the background to pure black (EXACTLY like dataset images)
+        # 3. Gör bakgrunden helt svart (EXAKT som bilderna i datasetet)
         filtered_img = cv2.bitwise_and(frame_bgr, frame_bgr, mask=mask)
 
-        # 4. Find shape contours from the mask
+        # 4. Hitta formernas konturer i masken
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         rois = []
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            # Filter 1: Size limits (reject noise < 15,000px and giant background blobs > 70,000px)
+            # Filter 1: storlek (släng brus < 15 000 px och stora blobs i bakgrunden > 70 000 px)
             if area < min_area or area > max_area:
                 continue
 
             x, y, w, h = cv2.boundingRect(cnt)
 
-            # Filter 2: Workspace boundaries (ignore top ceiling beams and bottom robot arm)
+            # Filter 2: kanterna (ignorera balkarna upptill och robotarmen nertill)
             if y < int(h_img * 0.05) or (y + h) > int(h_img * 0.85):
                 continue
 
-            # Filter 3: Aspect ratio (real shapes are roughly 1:1, reject long streaks/cables)
+            # Filter 3: proportioner (riktiga former är ungefär 1:1, släng långa streck / kablar)
             aspect = w / float(h) if h > 0 else 0
             if aspect < 0.45 or aspect > 2.2:
                 continue
 
-            # 5. Proportional padding (25% of max dimension, matching capture_dataset.py)
+            # 5. Padding: 25 % av längsta sidan (samma som när datasetet togs)
             pad = int(max(w, h) * pad_frac)
             y1 = max(0, y - pad)
             y2 = min(h_img, y + h + pad)
             x1 = max(0, x - pad)
             x2 = min(w_img, x + w + pad)
 
-            # 6. Crop from the MASKED image (black background)
+            # 6. Croppa från den MASKADE bilden (svart bakgrund)
             roi = filtered_img[y1:y2, x1:x2]
             if roi.size > 0:
                 rois.append(((x, y, w, h), roi))
@@ -188,7 +188,7 @@ class VisionPipeline:
         return rois
 
     def _calculate_symmetry_angle(self, shape: str, sin_v: float, cos_v: float) -> float:
-        """Calculates optimal gripper angle in degrees considering rotational symmetry."""
+        """Vinkeln för gripen i grader, kortaste vridningen tack vare formens symmetri."""
         raw_angle = float(np.degrees(np.arctan2(sin_v, cos_v)))
         if shape == "Circle":
             return 0.0
@@ -202,19 +202,19 @@ class VisionPipeline:
     def infer_roi(
         self, bbox: Tuple[int, int, int, int], roi_bgr: np.ndarray, min_confidence: float = 0.85
     ) -> Optional[DetectedShape]:
-        """Runs the 3-head ONNX model on a single cropped shape."""
+        """Kör nätverket (3 heads) på en crop och gör om svaret till en DetectedShape."""
         x, y, w, h = bbox
 
-        # Preprocess: Resize (128x128), RGB, normalize, NCHW layout
+        # Preprocessing: resize till 128x128, RGB, normalisera, (färg, höjd, bredd)
         rgb = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2RGB)
         resized = cv2.resize(rgb, (128, 128)).astype(np.float32) / 255.0
         normalized = (resized - self.mean) / self.std
         tensor = np.expand_dims(np.transpose(normalized, (2, 0, 1)), axis=0)
 
-        # Run model inference
+        # Kör modellen
         outputs = self.session.run(None, {self.input_name: tensor})
 
-        # Head 1: Shape Classification
+        # Head 1: class
         logits = outputs[0][0]
         class_idx = int(np.argmax(logits))
         shape_name = self.CLASSES[class_idx]
@@ -222,25 +222,25 @@ class VisionPipeline:
         if shape_name not in self.target_shapes:
             return None
 
-        # Confidence calculation
+        # Confidence: softmax gör om poängen till sannolikheter
         exp_logits = np.exp(logits - np.max(logits))
         confidence = float(exp_logits[class_idx] / np.sum(exp_logits))
 
         print(f"  Candidate at ({x},{y}): {shape_name} | Conf: {confidence*100:.1f}% | Area: {w*h}px")
 
-        # Filter 4: Reject low-confidence predictions
+        # Filter 4: släng gissningar med låg confidence
         if confidence < min_confidence:
             return None
 
-        # Head 2: Orientation Angle
+        # Head 2: vinkel
         sin_v, cos_v = float(outputs[1][0][0]), float(outputs[1][0][1])
         rz = self._calculate_symmetry_angle(shape_name, sin_v, cos_v)
 
-        # Head 3: Center position in pixels
+        # Head 3: centre i pixlar
         cx_px = x + float(outputs[2][0][0]) * w
         cy_px = y + float(outputs[2][0][1]) * h
 
-        # Translate coordinates to robot table mm (fallback to pixel coords if no ArUco marker)
+        # Till mm på bordet (om ingen ArUco-markör finns: pixlar)
         coords_mm = self.pixel_to_mm(cx_px, cy_px)
         if coords_mm is None:
             coords_mm = (round(float(cx_px), 1), round(float(cy_px), 1))
@@ -258,7 +258,7 @@ class VisionPipeline:
 
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:
         """
-        Processes a frame: calibrates, detects, infers, and translates coords.
+        En hel frame: kalibrera (första gången), hitta former, kör nätverket, räkna om till mm.
         """
         if self.homography_matrix is None:
             self.update_homography(frame_bgr)
@@ -276,29 +276,28 @@ class VisionPipeline:
         self, frame_bgr: np.ndarray, detections: List[DetectedShape]
     ) -> np.ndarray:
         """
-        Draws bounding boxes, shape labels, millimeter coordinates,
-        and orientation vectors on the frame with high-contrast text badges.
+        Ritar bounding box, centre, vinkelpil och en textruta (form, X, Y, RZ) för varje form.
         """
         annotated = frame_bgr.copy()
 
         for obj in detections:
             x, y, w, h = obj.bbox
 
-            # Draw bounding box
+            # Bounding box
             cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-            # Draw center point
+            # Centre
             cx, cy = int(obj.cx_px), int(obj.cy_px)
             cv2.circle(annotated, (cx, cy), 6, (0, 0, 255), -1)
 
-            # Draw orientation arrow (gripper rotation angle)
+            # Vinkelpil (gripens vridning)
             angle_rad = np.radians(obj.rz_deg)
             arrow_len = 45
             end_x = int(cx + arrow_len * np.cos(angle_rad))
             end_y = int(cy - arrow_len * np.sin(angle_rad))
             cv2.arrowedLine(annotated, (cx, cy), (end_x, end_y), (255, 50, 50), 3, tipLength=0.3)
 
-            # High-contrast text label badge
+            # Textruta med svart bakgrund
             label = f"{obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg}\xc2\xb0"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
 
