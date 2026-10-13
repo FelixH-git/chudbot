@@ -27,7 +27,13 @@ SLOT_ANGLE_ROBOT_DEG = {"Circle": 0.0, "Hexagon": -5.4, "Square": -1.7, "Star": 
 # så vinklar byter tecken markör -> robot. Bekräftat med GT-fotona.
 MARKER_Y_FLIPPED = True
 # Extra vridning mellan markörens X-axel och robotens X-axel (0 = wobjAruco X längs markörens X).
-MARKER_TO_ROBOT_ROT_DEG = 0.0
+# 90: triangel och hexagon hamnade 30° fel med 0 (kvadraten syns inte, 90 mod 90 = 0).
+# Hamnar triangeln 60° fel med 90, byt till -90.
+MARKER_TO_ROBOT_ROT_DEG = 90.0
+
+# Minsta area (px) för en Circle. Magneterna ser ut som cirklar men är hälften så stora
+# (magnet ca 32 000-45 000 px, riktig cirkel ca 88 000 px). Gäller kamerans nuvarande höjd.
+MIN_CIRCLE_AREA = 70000
 
 # Var X/Y kommer ifrån: "ai" = head 3 i nätverket, "cv2" = mitten av formens mask
 CENTER_SOURCE = "ai"
@@ -186,8 +192,8 @@ class VisionPipeline:
     def extract_rois(
         self,
         frame_bgr: np.ndarray,
-        min_area: int = 15000,
-        max_area: int = 70000,
+        min_area: int = 43000,
+        max_area: int = 120000,
     ) -> List[Tuple[Tuple[int, int, int, int], np.ndarray]]:
         """
         Gör bakgrunden svart med en HSV-färgmask (som i datasetet), tar bort saker vid kanterna
@@ -297,6 +303,12 @@ class VisionPipeline:
         roi_mask = (cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY) > 0).astype(np.uint8)
         contours, _ = cv2.findContours(roi_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contour_px = (max(contours, key=cv2.contourArea).reshape(-1, 2) + [crop_x, crop_y]) if contours else None
+
+        # Filter 5: en för liten "Circle" är en magnet, inte en bit
+        if shape_name == "Circle" and (contour_px is None or cv2.contourArea(
+                contour_px.astype(np.int32)) < MIN_CIRCLE_AREA):
+            return None
+
         if CENTER_SOURCE == "cv2":
             gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
             M = cv2.moments((gray > 0).astype(np.uint8), binaryImage=True)
@@ -383,10 +395,10 @@ class VisionPipeline:
             # Bounding box
             cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-            # Ghost: biten efter att roboten vridit den med RZ (magenta)
+            # Ghost: biten efter att roboten vridit den med RZ (blå)
             ghost = self.ghost_outline(obj)
             if ghost is not None:
-                cv2.polylines(annotated, [ghost], True, (255, 0, 255), 3, cv2.LINE_AA)
+                cv2.polylines(annotated, [ghost], True, (255, 0, 0), 3, cv2.LINE_AA)
 
             # Centre
             cx, cy = int(obj.cx_px), int(obj.cy_px)

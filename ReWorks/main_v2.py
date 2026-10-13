@@ -147,7 +147,7 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param):
 
 # THREAD 4: GUI (main thread)
 def main():
-
+    global selected_shape_info
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "neural_net", "models", "crpnet.onnx")
     if not os.path.exists(model_path):
