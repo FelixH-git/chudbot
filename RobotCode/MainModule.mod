@@ -31,14 +31,11 @@ MODULE MainModule
                 
                 ! 3. Set the pick height (Z). Negative numbers mean it will pick from higher up
                 shape.trans.z := 0.0; 
-                ! 4. Apply the AI rotation (spinning around the tool's Z-axis)
-                ! If the robot rotates the wrong way (CW instead of CCW), change this to -currentJob.rz_val
-                shape := RelTool(shape, 0, 0, 0 \Rz:=currentJob.rz_val);
                 
                 PrintRobtarget(shape);
                 
-                ! 4. Call the sorting module
-                move_to_shape currentJob.job_Shape;
+                ! 4. Call sorting module (passes shape and rotation to rotate after pick)
+                move_to_shape currentJob.job_Shape, currentJob.rz_val;
                 
             ELSE
                 IF servermMessage <> "" THEN
