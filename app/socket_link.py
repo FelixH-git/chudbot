@@ -18,7 +18,7 @@ from __future__ import annotations
 import socket
 from typing import Optional
 
-DEFAULT_HOST = "0.0.0.0"
+DEFAULT_HOST = "192.168.125.201"
 DEFAULT_PORT = 5000
 
 
