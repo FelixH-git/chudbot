@@ -1,7 +1,6 @@
 MODULE dataParser
 
-    ! 1. The RECORD is defined here. Because it is in this module,
-    ! every other module in the robot automatically knows what a ShapeJob is.
+    ! The RECORD is defined here so every module knows what a ShapeJob is.
     RECORD ShapeJob
         string job_Shape;
         num x_val;
@@ -9,46 +8,58 @@ MODULE dataParser
         num rz_val;
     ENDRECORD
 
-    ! The parsing function. It takes the raw string, fills out the record,
-    ! and returns TRUE if full, FALSE if string invalid.
+    ! The parsing function with the two Safety Shields to prevent ChPos errors
     FUNC bool ParseJobString(string raw_message, INOUT ShapeJob parsed_job)
-        VAR string x_str;
-        VAR string y_str;
-        VAR string angle_str;
-        VAR num idx1;
-        VAR num idx2;
-        VAR num idx3;
-        VAR bool ok := FALSE;
+        VAR num search_start := 1;
+        VAR num semi_idx;
+        VAR num eq_idx;
+        VAR string TOKEN;
+        VAR string key;
+        VAR string val;
+        VAR bool got_shape := FALSE;
+        VAR bool got_x := FALSE;
+        VAR bool got_y := FALSE;
+        VAR bool got_rz := FALSE;
+        VAR num tpm_num;
 
-        ! Find 1st comma
-        idx1 := StrFind(raw_message, 1, ",");
-        IF idx1 > 0 THEN
-            parsed_job.job_shape := StrPart(raw_message, 1, idx1 - 1);
+        TPWrite "RECEIVED: " + raw_message;
 
-            ! Find 2nd comma
-            idx2 := StrFind(raw_message, idx1 + 1, ",");
-            IF idx2 > 0 THEN
-                x_str := StrPart(raw_message, idx1 + 1, idx2 - (idx1 + 1));
+        WHILE search_start <= StrLen(raw_message) DO
+            semi_idx := StrFind(raw_message, search_start, ";");
+            IF semi_idx = 0 THEN
+                semi_idx := StrLen(raw_message) + 1;
+            ENDIF
 
-                ! Find 3rd comma
-                idx3 := StrFind(raw_message, idx2 + 1, ",");
-                IF idx3 > 0 THEN
-                    y_str := StrPart(raw_message, idx2 + 1, idx3 - (idx2 + 1));
-                    angle_str := StrPart(raw_message, idx3 + 1, StrLen(raw_message) - idx3);
+            ! SHIELD 1: Ensure there is data between the semicolons
+            IF (semi_idx - search_start) > 0 THEN
+                TOKEN := StrPart(raw_message, search_start, semi_idx - search_start);
 
-                    ! Convert strings to numbers
-                    ok := StrToVal(x_str, parsed_job.x_val);
-                    ok := ok AND StrToVal(y_str, parsed_job.y_val);
-                    ok := ok AND StrToVal(angle_str, parsed_job.rz_val);
+                eq_idx := StrFind(TOKEN, 1, "=");
 
-                    IF ok THEN
-                        RETURN TRUE; ! Parsing was 100% successful
+                ! SHIELD 2: Ensure '=' exists, isn't the first char, and isn't the last char
+                IF (eq_idx > 1) AND (eq_idx < StrLen(TOKEN)) THEN
+                    key := StrPart(TOKEN, 1, eq_idx - 1);
+                    val := StrPart(TOKEN, eq_idx + 1, StrLen(TOKEN) - eq_idx);
+
+                    IF key = "SHAPE" THEN
+                        parsed_job.job_Shape := val;
+                        got_shape := TRUE;
+                    ELSEIF key = "X" THEN
+                        got_x := StrToVal(val, tpm_num);
+                        parsed_job.x_val := tpm_num;
+                    ELSEIF key = "Y" THEN
+                        got_y := StrToVal(val, tpm_num);
+                        parsed_job.y_val := tpm_num;
+                    ELSEIF key = "RZ" THEN
+                        got_rz := StrToVal(val, tpm_num);
+                        parsed_job.rz_val := tpm_num;
                     ENDIF
                 ENDIF
             ENDIF
-        ENDIF
 
-        RETURN FALSE; ! Something failed
+            search_start := semi_idx + 1;
+        ENDWHILE
+
+        RETURN got_shape AND got_x AND got_y AND got_rz;
     ENDFUNC
-
 ENDMODULE

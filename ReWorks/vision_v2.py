@@ -6,6 +6,7 @@ Vision pipeline: hittar formerna i kamerabilden och räknar ut vad roboten ska g
 - RZ = hur mycket roboten ska vrida biten så att den passar i sitt fack i trayen.
 """
 
+import os
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import cv2
@@ -33,6 +34,9 @@ CENTER_SOURCE = "ai"
 
 IMG_SIZE = 128
 CANVAS_MARGIN = 0.15   # svart kant runt cropen innan resize (samma som i training)
+
+# Modellen som tränas och exporteras av neural_net/train.py
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neural_net", "models", "crpnet.onnx")
 
 
 def wrap_period(deg: float, period: float) -> float:
@@ -74,7 +78,7 @@ class VisionPipeline:
 
     def __init__(
         self,
-        model_path: str = "shape_3head_v2.onnx",
+        model_path: str = MODEL_PATH,
         marker_size_mm: float = 100.0,
         target_shapes: Optional[List[str]] = None,
         pad_frac: float = 0.25,
@@ -112,7 +116,7 @@ class VisionPipeline:
         angle_shape = self.session.get_outputs()[1].shape
         if len(angle_shape) != 3:
             raise ValueError(
-                f"{model_path} is an old (v1) model. Export shape_3head_v2.onnx from the notebook."
+                f"{model_path} is an old (v1) model. Export crpnet.onnx with neural_net/train.py."
             )
 
     def update_homography(self, frame_bgr: np.ndarray) -> bool:
@@ -419,5 +423,5 @@ class VisionPipeline:
 
 if __name__ == "__main__":
     print("Testing VisionPipeline initialization...")
-    pipeline = VisionPipeline(model_path="shape_3head_v2.onnx")
+    pipeline = VisionPipeline()
     print("VisionPipeline initialized successfully!")
