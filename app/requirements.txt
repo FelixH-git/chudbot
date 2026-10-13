@@ -1,0 +1,11 @@
+# Runtime dependencies for the app/ pipeline (Python 3.11).
+# Install:  uv venv venv --python 3.11
+#           uv pip install --python venv/Scripts/python.exe -r app/requirements.txt
+#
+# pypylon is only needed for the physical Basler camera and ships with the
+# Basler pylon SDK; it is not on PyPI for every platform, so install it
+# separately (the app falls back to test.png when it is missing).
+numpy
+opencv-python
+onnxruntime
+pandas
