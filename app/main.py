@@ -126,6 +126,8 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param) -> None:
 
 # ── Thread 4: GUI (main) ─────────────────────────────────────────────────────
 def main() -> None:
+    global selected_shape_info
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     image_path = os.path.join(script_dir, "test.png")
     if not os.path.exists(image_path):
