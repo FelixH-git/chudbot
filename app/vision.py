@@ -70,6 +70,16 @@ CENTER_SOURCE = "ai"
 IMG_SIZE = 128
 CANVAS_MARGIN = 0.15  # black border around the crop before resize (as in training)
 
+# Robot key per class, matching the tray targets in RobotCode/MainModule.mod
+# (move_to_shape switches on these).
+ROBOT_SHAPE_KEY = {
+    "Circle": "pcircle",
+    "Hexagon": "phexa",
+    "Square": "psquare",
+    "Star": "pstar",
+    "Triangle": "ptriangle",
+}
+
 
 def wrap_period(deg: float, period: float) -> float:
     """Fold an angle into [-period/2, period/2). E.g. square (90): 100 -> 10."""
@@ -92,8 +102,9 @@ class DetectedShape:
     contour_px: Optional[np.ndarray] = None       # full-image contour (for the ghost outline)
 
     def to_robot_command(self) -> str:
-        """Text the RAPID code reads from the socket (see RobotCode/parser.txt)."""
-        return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={self.rz_deg:.1f};END\r\n"
+        """Text the RAPID code reads from the socket (see RobotCode/ServerComm.mod)."""
+        key = ROBOT_SHAPE_KEY.get(self.shape, self.shape.lower())
+        return f"SHAPE={key};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={self.rz_deg:.1f};END\r\n"
 
 
 @dataclass
