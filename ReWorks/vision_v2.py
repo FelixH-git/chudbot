@@ -7,6 +7,7 @@ Vision pipeline: hittar formerna i kamerabilden och räknar ut vad roboten ska g
 """
 
 import os
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import cv2
@@ -40,6 +41,9 @@ CENTER_SOURCE = "ai"
 
 IMG_SIZE = 128
 CANVAS_MARGIN = 0.15   # svart kant runt cropen innan resize (samma som i training)
+
+# Skriv ut candidates högst en gång per så här många sekunder (annars fylls terminalen)
+LOG_INTERVAL_S = 10.0
 
 # Modellen som tränas och exporteras av neural_net/train.py
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neural_net", "models", "crpnet.onnx")
@@ -93,6 +97,8 @@ class VisionPipeline:
         self.target_shapes = target_shapes or ["Hexagon", "Triangle", "Circle", "Square", "Star"]
         self.homography_matrix: Optional[np.ndarray] = None
         self.pad_frac = pad_frac
+        self._last_log = 0.0        # när candidates senast skrevs ut
+        self._log_frame = True      # ska den här framens candidates skrivas ut?
 
         # Normaliseringen som användes i training (ImageNet)
         self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -124,6 +130,10 @@ class VisionPipeline:
             raise ValueError(
                 f"{model_path} is an old (v1) model. Export crpnet.onnx with neural_net/train.py."
             )
+
+    def log_next_frame(self) -> None:
+        """Skriv ut candidates för nästa frame, oavsett LOG_INTERVAL_S (t.ex. direkt efter ett val)."""
+        self._last_log = float("-inf")
 
     def update_homography(self, frame_bgr: np.ndarray) -> bool:
         """
@@ -200,6 +210,12 @@ class VisionPipeline:
         (balkar / robotarm) och klipper ut en crop per form med 25 % padding.
         """
         h_img, w_img = frame_bgr.shape[:2]
+
+        # Bestäm en gång per frame om candidates ska skrivas ut (högst var LOG_INTERVAL_S sekund)
+        now = time.monotonic()
+        self._log_frame = now - self._last_log >= LOG_INTERVAL_S
+        if self._log_frame:
+            self._last_log = now
 
         # 1. HSV-färgfilter: behåller färgade former, bord och skuggor blir svarta
         hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
@@ -292,7 +308,8 @@ class VisionPipeline:
         exp_logits = np.exp(logits - np.max(logits))
         confidence = float(exp_logits[class_idx] / np.sum(exp_logits))
 
-        print(f"  Candidate at ({x},{y}): {shape_name} | Conf: {confidence*100:.1f}% | Area: {w*h}px")
+        if self._log_frame:
+            print(f"  Candidate at ({x},{y}): {shape_name} | Conf: {confidence*100:.1f}% | Area: {w*h}px")
 
         # Filter 4: släng gissningar med låg confidence
         if confidence < min_confidence:

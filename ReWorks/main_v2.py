@@ -119,7 +119,14 @@ def thread_robot_server(robot_link: RobotLink):
     print("[Thread 3: Server Communication] Stopped.")
 
 
-# MUSKLICK (klicka för att plocka)
+def report_selection(s: DetectedShape, source: str, pipeline: VisionPipeline) -> None:
+    """Skriver ut den valda formen och kommandot som skickas, och alla candidates igen nästa frame."""
+    print(f"\n[{source}] Selected {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
+    print(f"[{source}] Command: {s.to_robot_command().strip()}")
+    pipeline.log_next_frame()
+
+
+# MUSKLICK (klicka för att plocka). param = vision pipeline (ges i setMouseCallback)
 def on_mouse_click(event, mouse_x, mouse_y, flags, param):
     """Anropas av OpenCV när man klickar i videofönstret."""
     global selected_shape_info
@@ -132,7 +139,7 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param):
             bx, by, bw, bh = s.bbox
             # Klickade man inuti den här formens bounding box?
             if bx <= mouse_x <= (bx + bw) and by <= mouse_y <= (by + bh):
-                print(f"\n[USER CLICK] Selected {s.shape} at X={s.x_mm}mm, Y={s.y_mm}mm")
+                report_selection(s, "USER CLICK", param)
                 cmd = s.to_robot_command()
                 robot_command_queue.put(cmd)
 
@@ -189,7 +196,7 @@ def main():
     window_name = "ABB Robot Vision & Picking Control"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1240, 720)
-    cv2.setMouseCallback(window_name, on_mouse_click)
+    cv2.setMouseCallback(window_name, on_mouse_click, pipeline)
 
     print("\n=========================================================")
     print(" SYSTEM RUNNING (4 Threads Active)")
@@ -275,7 +282,7 @@ def main():
                 # Hitta första formen av den sorten och skicka den
                 for s in current_shapes:
                     if s.shape.lower() == target_shape_name.lower():
-                        print(f"\n[HOTKEY] Selected {s.shape} at X={s.x_mm}, Y={s.y_mm}")
+                        report_selection(s, "HOTKEY", pipeline)
                         robot_command_queue.put(s.to_robot_command())
                         with selected_shape_lock:
                             selected_shape_info = {
