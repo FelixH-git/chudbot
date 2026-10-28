@@ -398,6 +398,30 @@ class VisionPipeline:
         ghost_px = cv2.perspectiveTransform(ghost_mm.reshape(-1, 1, 2), np.linalg.inv(H)).reshape(-1, 2)
         return ghost_px.astype(np.int32)
 
+    def draw_scale_bar(self, img: np.ndarray, length_mm: float = 10.0) -> None:
+        """Ritar ett |---| nere till vänster som är length_mm lång i pixlar (mätt vid bildens mitt)."""
+        if self.homography_matrix is None:
+            return
+        H = self.homography_matrix
+        h_img, w_img = img.shape[:2]
+
+        # Bildens mitt -> mm, gå length_mm i X, och tillbaka till pixlar
+        centre = np.array([[[w_img / 2, h_img / 2]]], dtype=np.float64)
+        x_mm, y_mm = cv2.perspectiveTransform(centre, H)[0, 0]
+        end = cv2.perspectiveTransform(np.array([[[x_mm + length_mm, y_mm]]], dtype=np.float64), np.linalg.inv(H))[0, 0]
+        length_px = float(np.hypot(end[0] - centre[0, 0, 0], end[1] - centre[0, 0, 1]))
+
+        label = f"{length_mm:g} mm = {length_px:.0f} px"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+        x0, y = 50, h_img - 50
+        x1 = x0 + int(round(length_px))
+
+        cv2.rectangle(img, (x0 - 20, y - th - 25), (x1 + tw + 40, y + 20), (0, 0, 0), -1)
+        cv2.line(img, (x0, y), (x1, y), (255, 255, 255), 3)             # själva linjen
+        cv2.line(img, (x0, y - 10), (x0, y + 10), (255, 255, 255), 3)   # ändstreck
+        cv2.line(img, (x1, y - 10), (x1, y + 10), (255, 255, 255), 3)
+        cv2.putText(img, label, (x1 + 20, y + th // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+
     def draw_hud(
         self, frame_bgr: np.ndarray, detections: List[DetectedShape]
     ) -> np.ndarray:
@@ -447,6 +471,7 @@ class VisionPipeline:
                 cv2.LINE_AA,
             )
 
+        self.draw_scale_bar(annotated)
         return annotated
 
 
