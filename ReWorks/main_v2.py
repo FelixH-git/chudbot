@@ -119,9 +119,19 @@ def thread_robot_server(robot_link: RobotLink):
     print("[Thread 3: Server Communication] Stopped.")
 
 
+# Vilken färg som får plockas. None = alla. Byts med sifferknapparna i GUI:t.
+pick_colour: Optional[str] = None
+COLOUR_KEYS = {ord("0"): None, ord("1"): "red", ord("2"): "green", ord("3"): "blue", ord("4"): "yellow"}
+
+
+def colour_ok(s: DetectedShape) -> bool:
+    """True om formen har den färg som får plockas just nu."""
+    return pick_colour is None or s.colour == pick_colour
+
+
 def report_selection(s: DetectedShape, source: str, pipeline: VisionPipeline) -> None:
     """Skriver ut den valda formen och kommandot som skickas, och alla candidates igen nästa frame."""
-    print(f"\n[{source}] Selected {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
+    print(f"\n[{source}] Selected {s.colour} {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
     print(f"[{source}] Command: {s.to_robot_command().strip()}")
     pipeline.log_next_frame()
 
@@ -139,6 +149,9 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param):
             bx, by, bw, bh = s.bbox
             # Klickade man inuti den här formens bounding box?
             if bx <= mouse_x <= (bx + bw) and by <= mouse_y <= (by + bh):
+                if not colour_ok(s):
+                    print(f"\n[USER CLICK] {s.colour} {s.shape} ignored: only picking {pick_colour}")
+                    break
                 report_selection(s, "USER CLICK", param)
                 cmd = s.to_robot_command()
                 robot_command_queue.put(cmd)
@@ -154,7 +167,7 @@ def on_mouse_click(event, mouse_x, mouse_y, flags, param):
 
 # THREAD 4: GUI (main thread)
 def main():
-    global selected_shape_info
+    global selected_shape_info, pick_colour
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "neural_net", "models", "crpnet.onnx")
     if not os.path.exists(model_path):
@@ -202,6 +215,7 @@ def main():
     print(" SYSTEM RUNNING (4 Threads Active)")
     print(" - CLICK on any shape on the screen to pick it!")
     print(" - HOTKEYS: [S]tar, [T]riangle, [C]ircle, [H]exagon")
+    print(" - COLOUR: [0] all, [1] red, [2] green, [3] blue, [4] yellow")
     print(" - Press [Q] to exit.")
     print("=========================================================\n")
 
@@ -254,6 +268,7 @@ def main():
             status_text = (
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
                 f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
+                f"COLOUR: {(pick_colour or 'ALL').upper()} [0-4] | "
                 f"CLICK SHAPE OR PRESS [S/T/C/H] TO PICK"
             )
             banner_color = (0, 180, 0) if robot_link.connected else (0, 120, 255)
@@ -275,13 +290,16 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == 27:  # 'q' eller ESC
                 break
+            elif key in COLOUR_KEYS:
+                pick_colour = COLOUR_KEYS[key]
+                print(f"\n[COLOUR] Now picking: {pick_colour or 'all colours'}")
             elif key in (ord("s"), ord("t"), ord("c"), ord("h")):
                 key_map = {ord("s"): "Star", ord("t"): "Triangle", ord("c"): "Circle", ord("h"): "Hexagon"}
                 target_shape_name = key_map[key]
 
                 # Hitta första formen av den sorten och skicka den
                 for s in current_shapes:
-                    if s.shape.lower() == target_shape_name.lower():
+                    if s.shape.lower() == target_shape_name.lower() and colour_ok(s):
                         report_selection(s, "HOTKEY", pipeline)
                         robot_command_queue.put(s.to_robot_command())
                         with selected_shape_lock:

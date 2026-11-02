@@ -45,6 +45,24 @@ CANVAS_MARGIN = 0.15   # svart kant runt cropen innan resize (samma som i traini
 # Skriv ut candidates högst en gång per så här många sekunder (annars fylls terminalen)
 LOG_INTERVAL_S = 10.0
 
+# Färg på biten, från medianen av hue (HSV, OpenCV 0..179) för bitens pixlar. Ingen AI, ingen omträning.
+# (namn, hue från, hue till). Röd ligger i båda ändarna av hue-cirkeln.
+COLOUR_RANGES = [("red", 0, 15), ("yellow", 15, 35), ("green", 35, 85),
+                 ("blue", 85, 130), ("purple", 130, 160), ("red", 160, 180)]
+
+
+def colour_name(roi_bgr: np.ndarray, mask: np.ndarray) -> str:
+    """Bitens färg som ett namn ("red", "green" ...), från medianen av hue i masken."""
+    hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+    hues = hsv[..., 0][mask > 0]
+    if hues.size == 0:
+        return "unknown"
+    h = float(np.median(hues))
+    for name, lo, hi in COLOUR_RANGES:
+        if lo <= h < hi:
+            return name
+    return "unknown"
+
 # Modellen som tränas och exporteras av neural_net/train.py
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neural_net", "models", "crpnet.onnx")
 
@@ -67,6 +85,7 @@ class DetectedShape:
     bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
     theta_img_deg: float = 0.0        # bitens vinkel i bilden (för att rita)
     contour_px: Optional[np.ndarray] = None   # konturen i pixlar i hela bilden (för ghost)
+    colour: str = "unknown"                   # bitens färg, se colour_name
 
     def to_robot_command(self) -> str:
         """Texten som RAPID-koden på roboten läser från socketen."""
@@ -363,6 +382,7 @@ class VisionPipeline:
             bbox=bbox,
             theta_img_deg=theta_img,
             contour_px=contour_px,
+            colour=colour_name(roi_bgr, roi_mask),
         )
 
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:
@@ -454,7 +474,7 @@ class VisionPipeline:
                 cv2.arrowedLine(annotated, (cx, cy), (end_x, end_y), (255, 50, 50), 3, tipLength=0.3)
 
             # Textruta med svart bakgrund
-            label = f"{obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg} deg"
+            label = f"{obj.colour} {obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg} deg"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
 
             badge_y1 = max(0, y - th - 12)
