@@ -15,7 +15,6 @@ import numpy as np
 import onnxruntime as ort
 
 
-# ── Kalibrering (måste stämma med training) ──────────────────────────────────
 # Vilket hörn på markören som är (0, 0). OpenCV-ordning: 0=TL, 1=TR, 2=BR, 3=BL (markörens egen frame).
 # 2 = hörnet längst till vänster i kamerabilden. X pekar mot nästa hörn, Y mot det föregående.
 ORIGIN_CORNER = 2
@@ -46,13 +45,13 @@ CANVAS_MARGIN = 0.15   # svart kant runt cropen innan resize (samma som i traini
 LOG_INTERVAL_S = 10.0
 
 # Färg på biten, från medianen av hue (HSV, OpenCV 0..179) för bitens pixlar. Ingen AI, ingen omträning.
-# (namn, hue från, hue till). Röd ligger i båda ändarna av hue-cirkeln.
-COLOUR_RANGES = [("red", 0, 15), ("yellow", 15, 35), ("green", 35, 85),
-                 ("blue", 85, 130), ("purple", 130, 160), ("red", 160, 180)]
+# (namn, hue från, hue till). Röd (och orange) ligger i båda ändarna av hue-cirkeln.
+# Bara färgerna vi plockar; allt annat (t.ex. gula magneter) blir "unknown" och plockas aldrig i färgläge.
+COLOUR_RANGES = [("red", 0, 25), ("green", 35, 85), ("blue", 85, 130), ("red", 160, 180)]
 
 
 def colour_name(roi_bgr: np.ndarray, mask: np.ndarray) -> str:
-    """Bitens färg som ett namn ("red", "green" ...), från medianen av hue i masken."""
+    """Bitens färg som ett namn ("red", "green", "blue"), från medianen av hue i masken (bara biten själv)."""
     hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
     hues = hsv[..., 0][mask > 0]
     if hues.size == 0:
@@ -340,6 +339,11 @@ class VisionPipeline:
         contours, _ = cv2.findContours(roi_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contour_px = (max(contours, key=cv2.contourArea).reshape(-1, 2) + [crop_x, crop_y]) if contours else None
 
+        # Bara själva biten (största blobben), inte delar av grannbitar som råkar ligga i cropen
+        piece_mask = np.zeros_like(roi_mask)
+        if contours:
+            cv2.drawContours(piece_mask, [max(contours, key=cv2.contourArea)], -1, 1, -1)
+
         # Filter 5: en för liten "Circle" är en magnet, inte en bit
         if shape_name == "Circle" and (contour_px is None or cv2.contourArea(
                 contour_px.astype(np.int32)) < MIN_CIRCLE_AREA):
@@ -382,7 +386,7 @@ class VisionPipeline:
             bbox=bbox,
             theta_img_deg=theta_img,
             contour_px=contour_px,
-            colour=colour_name(roi_bgr, roi_mask),
+            colour=colour_name(roi_bgr, piece_mask),
         )
 
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:

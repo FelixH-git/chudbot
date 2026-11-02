@@ -121,7 +121,7 @@ def thread_robot_server(robot_link: RobotLink):
 
 # Vilken färg som får plockas. None = alla. Byts med sifferknapparna i GUI:t.
 pick_colour: Optional[str] = None
-COLOUR_KEYS = {ord("0"): None, ord("1"): "red", ord("2"): "green", ord("3"): "blue", ord("4"): "yellow"}
+COLOUR_KEYS = {ord("0"): None, ord("1"): "red", ord("2"): "green", ord("3"): "blue"}
 
 
 def colour_ok(s: DetectedShape) -> bool:
@@ -220,7 +220,7 @@ def main():
     print(" SYSTEM RUNNING (4 Threads Active)")
     print(" - CLICK on any shape on the screen to pick it!")
     print(" - HOTKEYS: [S]tar, [T]riangle, [C]ircle, [H]exagon")
-    print(" - COLOUR: [0] all, [1] red, [2] green, [3] blue, [4] yellow")
+    print(" - COLOUR: [0] all, [1] red, [2] green, [3] blue")
     print(f" - [A] pick ALL pieces of the chosen colour ({PICK_ALL_DELAY_S:.0f} s apart), [X] stop")
     print(" - Press [Q] to exit.")
     print("=========================================================\n")
@@ -285,7 +285,7 @@ def main():
             status_text = (
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
                 f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
-                f"COLOUR: {(pick_colour or 'ALL').upper()} [0-4] | "
+                f"COLOUR: {(pick_colour or 'ALL').upper()} [0-3] | "
                 + (f"PICK ALL: {len(pick_all_pending)} LEFT [X] STOP" if pick_all_pending
                    else "CLICK SHAPE, [S/T/C/H] OR [A] = PICK ALL")
             )
@@ -311,6 +311,10 @@ def main():
             elif key in COLOUR_KEYS:
                 pick_colour = COLOUR_KEYS[key]
                 print(f"\n[COLOUR] Now picking: {pick_colour or 'all colours'}")
+                # Byt färg = avbryt en [A]-körning som pågår, så inga bitar av den gamla färgen skickas
+                if pick_all_pending:
+                    print(f"[PICK ALL] Stopped, {len(pick_all_pending)} of the old colour not sent")
+                    pick_all_pending = []
             elif key == ord("a"):
                 # Alla bitar av vald färg i den här framen. Bitarna ligger still, så positionerna gäller.
                 pick_all_pending = [s for s in current_shapes if colour_ok(s)]
