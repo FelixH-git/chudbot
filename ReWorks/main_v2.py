@@ -129,6 +129,11 @@ def colour_ok(s: DetectedShape) -> bool:
     return pick_colour is None or s.colour == pick_colour
 
 
+# [A] plockar ALLA bitar av vald färg, en i taget. Roboten svarar inte när den är klar,
+# så vi väntar så här länge mellan kommandona (en pick tar ungefär så lång tid). Justera på plats.
+PICK_ALL_DELAY_S = 30.0
+
+
 def report_selection(s: DetectedShape, source: str, pipeline: VisionPipeline) -> None:
     """Skriver ut den valda formen och kommandot som skickas, och alla candidates igen nästa frame."""
     print(f"\n[{source}] Selected {s.colour} {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
@@ -216,10 +221,13 @@ def main():
     print(" - CLICK on any shape on the screen to pick it!")
     print(" - HOTKEYS: [S]tar, [T]riangle, [C]ircle, [H]exagon")
     print(" - COLOUR: [0] all, [1] red, [2] green, [3] blue, [4] yellow")
+    print(f" - [A] pick ALL pieces of the chosen colour ({PICK_ALL_DELAY_S:.0f} s apart), [X] stop")
     print(" - Press [Q] to exit.")
     print("=========================================================\n")
 
     last_snapshot_time = 0.0
+    pick_all_pending: List[DetectedShape] = []   # bitar som [A] ska plocka, en i taget
+    next_pick_time = 0.0
 
     try:
         while not stop_event.is_set():
@@ -242,6 +250,15 @@ def main():
             # Hämta de senaste formerna från thread 2 (med lock)
             with shapes_lock:
                 current_shapes = list(latest_shapes)
+
+            # [A]: skicka nästa bit när pausen har gått
+            if pick_all_pending and time.time() >= next_pick_time:
+                s = pick_all_pending.pop(0)
+                report_selection(s, f"PICK ALL ({len(pick_all_pending)} left)", pipeline)
+                robot_command_queue.put(s.to_robot_command())
+                with selected_shape_lock:
+                    selected_shape_info = {"shape": s.shape, "bbox": s.bbox, "expire_time": time.time() + 1.5}
+                next_pick_time = time.time() + PICK_ALL_DELAY_S
 
             # Rita HUD
             display_frame = pipeline.draw_hud(frame, current_shapes)
@@ -269,7 +286,8 @@ def main():
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
                 f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
                 f"COLOUR: {(pick_colour or 'ALL').upper()} [0-4] | "
-                f"CLICK SHAPE OR PRESS [S/T/C/H] TO PICK"
+                + (f"PICK ALL: {len(pick_all_pending)} LEFT [X] STOP" if pick_all_pending
+                   else "CLICK SHAPE, [S/T/C/H] OR [A] = PICK ALL")
             )
             banner_color = (0, 180, 0) if robot_link.connected else (0, 120, 255)
             cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], 45), (30, 30, 30), -1)
@@ -293,6 +311,16 @@ def main():
             elif key in COLOUR_KEYS:
                 pick_colour = COLOUR_KEYS[key]
                 print(f"\n[COLOUR] Now picking: {pick_colour or 'all colours'}")
+            elif key == ord("a"):
+                # Alla bitar av vald färg i den här framen. Bitarna ligger still, så positionerna gäller.
+                pick_all_pending = [s for s in current_shapes if colour_ok(s)]
+                next_pick_time = 0.0
+                print(f"\n[PICK ALL] {len(pick_all_pending)} {pick_colour or 'pieces'} to pick: "
+                      + ", ".join(f"{s.colour} {s.shape}" for s in pick_all_pending))
+            elif key == ord("x"):
+                if pick_all_pending:
+                    print(f"\n[PICK ALL] Stopped, {len(pick_all_pending)} not sent")
+                pick_all_pending = []
             elif key in (ord("s"), ord("t"), ord("c"), ord("h")):
                 key_map = {ord("s"): "Star", ord("t"): "Triangle", ord("c"): "Circle", ord("h"): "Hexagon"}
                 target_shape_name = key_map[key]
