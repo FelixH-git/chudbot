@@ -6,8 +6,7 @@ from .config import CANVAS_MARGIN, IMG_SIZE, NORM_MEAN, NORM_STD
 
 
 def square_canvas(crop_bgr):
-    """
-    Lägger cropen i mitten av en svart kvadrat med marginal runt.
+    """pen i mitten av en svart kvadrat med marginal runt.
     Returnerar (canvas, (x0, y0, side)): var cropens övre vänstra hörn hamnar, och kvadratens storlek.
     """
     h, w = crop_bgr.shape[:2]

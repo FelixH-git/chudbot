@@ -156,7 +156,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         # Scale full-size corners down by 0.5 to match the resized image
                         scaled_corners = [c * 0.5 for c in corners]
                         cv2.aruco.drawDetectedMarkers(filtered_img, scaled_corners, ids)
-                        
+
                         aruco_perimeter = cv2.arcLength(scaled_corners[0], True)
                         pixel_cm_ratio = aruco_perimeter / (aruco_length * 4)
 
@@ -178,7 +178,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
                         # Use the top-left marker corner as the reference origin
                         aruco_ref = tl
                         aruco_ref_int = (int(aruco_ref[0]), int(aruco_ref[1]))
-                        
+
                         # Draw the marker reference (corner) point
                         cv2.circle(filtered_img, aruco_ref_int, 5, (255, 0, 0), -1)
 
@@ -203,7 +203,7 @@ with pylon.InstantCamera(pylon.FirstFound) as camera:
 
                                     # Classify the shape of the colored object
                                     shape = detect_shape(cnt)
-                                    
+
                                     # Offset of the object center from the ArUco reference corner
                                     obj_vec = np.array([obj_cx, obj_cy]) - aruco_ref
 

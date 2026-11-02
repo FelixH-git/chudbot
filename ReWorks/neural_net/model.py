@@ -25,6 +25,8 @@ class CRPNet(nn.Module):
         # Head 1, class: medelvärde över hela griden räcker (VAR biten ligger spelar ingen roll)
         self.class_head = nn.Sequential(
             nn.AdaptiveAvgPool2d(1), nn.Flatten(),
+            # varför vi inte använder relu här är för att Imagenet använder hardswish
+            # 576 är nummer av kanaler 
             nn.Linear(576, 128), nn.Hardswish(), nn.Dropout(0.2),
             nn.Linear(128, n),
         )

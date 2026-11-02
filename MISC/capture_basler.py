@@ -37,7 +37,7 @@ python capture_basler.py --output-dir ./raw_images --mode auto \
 
 import argparse
 import time
-from datetime import datetime
+from datetime import datetimep
 from pathlib import Path
 
 import cv2

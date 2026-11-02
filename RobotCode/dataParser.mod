@@ -33,14 +33,13 @@ MODULE dataParser
             ! SHIELD 1: Ensure there is data between the semicolons
             IF (semi_idx - search_start) > 0 THEN
                 TOKEN := StrPart(raw_message, search_start, semi_idx - search_start);
-
+                
                 eq_idx := StrFind(TOKEN, 1, "=");
 
                 ! SHIELD 2: Ensure '=' exists, isn't the first char, and isn't the last char
                 IF (eq_idx > 1) AND (eq_idx < StrLen(TOKEN)) THEN
                     key := StrPart(TOKEN, 1, eq_idx - 1);
                     val := StrPart(TOKEN, eq_idx + 1, StrLen(TOKEN) - eq_idx);
-
                     IF key = "SHAPE" THEN
                         parsed_job.job_Shape := val;
                         got_shape := TRUE;
@@ -56,10 +55,8 @@ MODULE dataParser
                     ENDIF
                 ENDIF
             ENDIF
-
             search_start := semi_idx + 1;
         ENDWHILE
-
         RETURN got_shape AND got_x AND got_y AND got_rz;
     ENDFUNC
 ENDMODULE
