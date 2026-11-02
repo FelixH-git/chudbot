@@ -1,5 +1,9 @@
 MODULE moveToShape
     PROC move_to_shape(string shape_input, num rz_val)
+            VAR robtarget pDest;
+            VAR robtarget pDestApp;
+            VAR orient held_orient;
+
             waitforOK("");
             MoveJ phome, v100, fine, tsuck\WObj:=wobjAruco;
             
@@ -17,42 +21,50 @@ MODULE moveToShape
             ! 4. Rotate the piece in the air AFTER picking up!
             MoveL RelTool(shape, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAruco;
             
-            ! Move to tray approach with rotation applied
-            MoveJ RelTool(pApporach, 0, 0, 0 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-
-            ! Sorting logic (place into tray slot with rotation)
-            IF shape_input = "Star" THEN
-                MoveL RelTool(pStar, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-                MoveL RelTool(pStar, 0, 0, 0 \Rz:=rz_val), v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime 1.0;
-                suckOff;
-                MoveL RelTool(pStar, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-            ELSEIF shape_input = "Square" THEN
-                MoveL RelTool(pSquare, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-                MoveL RelTool(pSquare, 0, 0, 0 \Rz:=rz_val), v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime 1.0;
-                suckOff;
-                MoveL RelTool(pSquare, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-            ELSEIF shape_input = "Hexagon" THEN
-                MoveL RelTool(pHexagon, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-                MoveL RelTool(pHexagon, 0, 0, 0 \Rz:=rz_val), v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime 1.0;
-                suckOff;
-                MoveL RelTool(pHexagon, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-            ELSEIF shape_input = "Circle" THEN
-                MoveL RelTool(pCircle, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-                MoveL RelTool(pCircle, 0, 0, 0 \Rz:=rz_val), v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime 1.0;
-                suckOff;
-                MoveL RelTool(pCircle, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-            ELSEIF shape_input = "Triangle" THEN
-                MoveL RelTool(pTriangle, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-                MoveL RelTool(pTriangle, 0, 0, 0 \Rz:=rz_val), v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime 1.0;
-                suckOff;
-                MoveL RelTool(pTriangle, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-            ENDIF
+            ! 5. Freeze this exact rotation so the wrist DOES NOT rotate on the way to the tray!
+            held_orient := CRobT(\Tool:=tsuck \WObj:=wobjAiPlaceTray).rot;
             
+            ! Disable configuration checking so the robot takes the smooth path without twisting Axis 6
+            ConfJ \Off;
+            ConfL \Off;
+
+            ! Move to tray approach keeping the EXACT rotation
+            pDestApp := pApporach;
+            pDestApp.rot := held_orient;
+            MoveJ pDestApp, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+
+            ! Select the target slot
+            IF shape_input = "Star" THEN
+                pDest := pStar;
+            ELSEIF shape_input = "Square" THEN
+                pDest := pSquare;
+            ELSEIF shape_input = "Hexagon" THEN
+                pDest := pHexagon;
+            ELSEIF shape_input = "Circle" THEN
+                pDest := pCircle;
+            ELSEIF shape_input = "Triangle" THEN
+                pDest := pTriangle;
+            ELSE
+                TPWrite "Unknown shape: " + shape_input;
+                ConfJ \On;
+                ConfL \On;
+                RETURN;
+            ENDIF
+
+            ! Apply the exact rotation from the air to the tray slot
+            pDest.rot := held_orient;
+
+            ! Place into slot maintaining the rotation
+            MoveL RelTool(pDest, 0, 0, -100), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+            MoveL pDest, v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
+            WaitTime 1.0;
+            suckOff;
+            MoveL RelTool(pDest, 0, 0, -100), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+            
+            ! Restore configuration checking
+            ConfJ \On;
+            ConfL \On;
+
             ! Move back to safe approach over tray
             MoveL pApporach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
     ENDPROC
