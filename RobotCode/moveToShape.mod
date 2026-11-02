@@ -1,5 +1,6 @@
 MODULE moveToShape
     PROC move_to_shape(string shape_input, num rz_val)
+            VAR robtarget current_pos;
             VAR robtarget pDest;
             VAR robtarget pDestApp;
             VAR orient held_orient;
@@ -22,7 +23,8 @@ MODULE moveToShape
             MoveL RelTool(shape, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAruco;
             
             ! 5. Freeze this exact rotation so the wrist DOES NOT rotate on the way to the tray!
-            held_orient := CRobT(\Tool:=tsuck \WObj:=wobjAiPlaceTray).rot;
+            current_pos := CRobT(\Tool:=tsuck \WObj:=wobjAiPlaceTray);
+            held_orient := current_pos.rot;
             
             ! Disable configuration checking so the robot takes the smooth path without twisting Axis 6
             ConfJ \Off;
