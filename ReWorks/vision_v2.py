@@ -47,20 +47,21 @@ LOG_INTERVAL_S = 10.0
 # Färg på biten, från medianen av hue (HSV, OpenCV 0..179) för bitens pixlar. Ingen AI, ingen omträning.
 # (namn, hue från, hue till). Röd (och orange) ligger i båda ändarna av hue-cirkeln.
 # Bara färgerna vi plockar; allt annat (t.ex. gula magneter) blir "unknown" och plockas aldrig i färgläge.
-COLOUR_RANGES = [("red", 0, 25), ("green", 35, 85), ("blue", 85, 130), ("red", 160, 180)]
+# Blå går upp till 150: i annat ljus kan blått bli lite lila. Hue syns i etiketten (h=...) så gränserna kan justeras på plats.
+COLOUR_RANGES = [("red", 0, 25), ("green", 35, 85), ("blue", 85, 150), ("red", 160, 180)]
 
 
-def colour_name(roi_bgr: np.ndarray, mask: np.ndarray) -> str:
-    """Bitens färg som ett namn ("red", "green", "blue"), från medianen av hue i masken (bara biten själv)."""
+def colour_name(roi_bgr: np.ndarray, mask: np.ndarray) -> Tuple[str, float]:
+    """Bitens färg ("red", "green", "blue" eller "unknown") och dess hue, från medianen i masken (bara biten själv)."""
     hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
     hues = hsv[..., 0][mask > 0]
     if hues.size == 0:
-        return "unknown"
+        return "unknown", -1.0
     h = float(np.median(hues))
     for name, lo, hi in COLOUR_RANGES:
         if lo <= h < hi:
-            return name
-    return "unknown"
+            return name, h
+    return "unknown", h
 
 # Modellen som tränas och exporteras av neural_net/train.py
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neural_net", "models", "crpnet.onnx")
@@ -85,6 +86,7 @@ class DetectedShape:
     theta_img_deg: float = 0.0        # bitens vinkel i bilden (för att rita)
     contour_px: Optional[np.ndarray] = None   # konturen i pixlar i hela bilden (för ghost)
     colour: str = "unknown"                   # bitens färg, se colour_name
+    hue: float = -1.0                         # uppmätt hue (0..179), för att justera COLOUR_RANGES
 
     def to_robot_command(self) -> str:
         """Texten som RAPID-koden på roboten läser från socketen."""
@@ -375,6 +377,7 @@ class VisionPipeline:
         else:
             rz = self.robot_rz(shape_name, self.image_angle_to_marker_deg(cx_px, cy_px, theta_img))
 
+        colour, hue = colour_name(roi_bgr, piece_mask)
         return DetectedShape(
             shape=shape_name,
             x_mm=coords_mm[0],
@@ -386,7 +389,8 @@ class VisionPipeline:
             bbox=bbox,
             theta_img_deg=theta_img,
             contour_px=contour_px,
-            colour=colour_name(roi_bgr, piece_mask),
+            colour=colour,
+            hue=hue,
         )
 
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:
@@ -478,7 +482,7 @@ class VisionPipeline:
                 cv2.arrowedLine(annotated, (cx, cy), (end_x, end_y), (255, 50, 50), 3, tipLength=0.3)
 
             # Textruta med svart bakgrund
-            label = f"{obj.colour} {obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg} deg"
+            label = f"{obj.colour}(h{obj.hue:.0f}) {obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg} deg"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
 
             badge_y1 = max(0, y - th - 12)

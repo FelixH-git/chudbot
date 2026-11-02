@@ -136,7 +136,7 @@ PICK_ALL_DELAY_S = 30.0
 
 def report_selection(s: DetectedShape, source: str, pipeline: VisionPipeline) -> None:
     """Skriver ut den valda formen och kommandot som skickas, och alla candidates igen nästa frame."""
-    print(f"\n[{source}] Selected {s.colour} {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
+    print(f"\n[{source}] Selected {s.colour} (hue {s.hue:.0f}) {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
     print(f"[{source}] Command: {s.to_robot_command().strip()}")
     pipeline.log_next_frame()
 
