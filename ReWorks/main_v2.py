@@ -7,8 +7,9 @@ main_v2.py - vision och robotstyrning med 4 threads:
   3. Server-thread: skickar pick-kommandon till ABB-roboten via TCP-socket.
   4. GUI (main thread, Tkinter): kameran live med HUD och knappar.
      - Free pick: klicka på valfri bit för att plocka den.
-     - Colour pick: välj en färg med knapparna; bara bitar i den färgen visas och kan plockas,
-       "Pick all" plockar alla, en i taget.
+     - Colour pick: välj en färg med knapparna; bara bitar i den färgen visas och kan plockas.
+       "Queue all" sparar alla bitar i färgen i en kö (med nummer i bilden). Start plockar dem i ordning,
+       "Pick now" (eller klick på en bit) flyttar en bit först i kön.
   För våran variant så måste OK knapp tryckas på med
 """
 
@@ -122,9 +123,9 @@ def thread_robot_server(robot_link: RobotLink):
     print("[Thread 3: Server Communication] Stopped.")
 
 
-# "Pick all" plockar alla bitar av vald färg, en i taget. Roboten svarar inte när den är klar,
-# så vi väntar så här länge mellan kommandona (en pick tar ungefär så lång tid). Kan ändras i GUI:t.
-PICK_ALL_DELAY_S = 30.0
+# Kön plockas en bit i taget. Roboten svarar inte när den är klar, så vi väntar så här länge
+# mellan kommandona (en pick tar ungefär så lång tid). Kan ändras i GUI:t.
+PICK_ALL_DELAY_S = 20.0
 
 COLOURS = ["red", "green", "blue"]                                  # samma ordning som colour-headen
 BUTTON_COLOURS = {"red": "#dc2626", "green": "#16a34a", "blue": "#2563eb"}
@@ -140,7 +141,7 @@ def report_selection(s: DetectedShape, source: str, pipeline: VisionPipeline) ->
 
 
 class PickerApp:
-    """Tkinter-fönstret: kamerabilden till vänster, knappar och inställningar till höger."""
+    """Tkinter-fönstret: kamerabilden till vänster, knappar, kö och inställningar till höger."""
 
     def __init__(self, root, pipeline, robot_link, live_camera, static_frame):
         self.root = root
@@ -151,8 +152,9 @@ class PickerApp:
 
         self.mode = tk.StringVar(value="free")      # "free" eller "colour"
         self.colour: Optional[str] = None           # vald färg i colour-läget
-        self.pending: List[DetectedShape] = []      # bitar som "Pick all" ska plocka, en i taget
-        self.next_pick_time = 0.0
+        self.queue: List[DetectedShape] = []        # sparade bitar, plockas uppifrån och ner
+        self.running = False                        # plockar kön just nu?
+        self.next_pick_time = 0.0                   # tidigast när nästa kommando får skickas
         self.highlight: Optional[tuple] = None      # (bbox, shape, när den slutar lysa)
         self.shapes: List[DetectedShape] = []       # det som visas just nu
         self.scale = 1.0                            # fönsterpixlar per kamerapixel
@@ -168,12 +170,12 @@ class PickerApp:
 
         # Läge
         tk.Label(panel, text="Mode", font=("", 12, "bold")).pack(anchor="w")
-        for value, text in (("free", "Free pick (click any piece)"), ("colour", "Colour pick")):
+        for value, text in (("free", "Free pick (click any piece)"), ("colour", "Colour pick (queue)")):
             tk.Radiobutton(panel, text=text, variable=self.mode, value=value,
                            command=self.on_mode_change).pack(anchor="w")
 
         # Färgknappar
-        tk.Label(panel, text="Colour", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        tk.Label(panel, text="Colour", font=("", 12, "bold")).pack(anchor="w", pady=(10, 0))
         row = tk.Frame(panel); row.pack(anchor="w")
         self.colour_buttons = {}
         for c in COLOURS:
@@ -181,13 +183,26 @@ class PickerApp:
                           activebackground=BUTTON_COLOURS[c], command=lambda c=c: self.select_colour(c))
             b.pack(side="left", padx=2)
             self.colour_buttons[c] = b
-        self.pick_all_button = tk.Button(panel, text="Pick all", width=24, command=self.pick_all)
-        self.pick_all_button.pack(anchor="w", pady=(6, 2))
-        self.stop_button = tk.Button(panel, text="Stop", width=24, command=self.stop)
-        self.stop_button.pack(anchor="w")
+
+        # Kön
+        tk.Label(panel, text="Queue", font=("", 12, "bold")).pack(anchor="w", pady=(10, 0))
+        self.queue_button = tk.Button(panel, text="Queue all", width=30, command=self.queue_all)
+        self.queue_button.pack(anchor="w", pady=(0, 3))
+        self.queue_list = tk.Listbox(panel, height=7, width=40, font=("Courier", 9), activestyle="none")
+        self.queue_list.pack(anchor="w")
+        self.queue_list.bind("<Double-Button-1>", lambda e: self.pick_now())
+        row = tk.Frame(panel); row.pack(anchor="w", pady=(3, 0))
+        self.start_button = tk.Button(row, text="Start", width=6, command=self.start)
+        self.pick_now_button = tk.Button(row, text="Pick now", width=8, command=self.pick_now)
+        self.stop_button = tk.Button(row, text="Stop", width=5, command=self.stop)
+        self.clear_button = tk.Button(row, text="Clear", width=5, command=self.clear)
+        for b in (self.start_button, self.pick_now_button, self.stop_button, self.clear_button):
+            b.pack(side="left", padx=1)
+        self.queue_controls = [self.queue_button, self.start_button, self.pick_now_button,
+                               self.stop_button, self.clear_button]
 
         # Inställningar som beror på uppställningen
-        tk.Label(panel, text="Settings", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        tk.Label(panel, text="Settings", font=("", 12, "bold")).pack(anchor="w", pady=(10, 0))
         self.min_area = self._slider(panel, "Min piece area (px)", 5000, 250000, 1000, pipeline.min_area,
                                      lambda v: setattr(pipeline, "min_area", int(float(v))))
         self.max_area = self._slider(panel, "Max piece area (px)", 5000, 250000, 1000, pipeline.max_area,
@@ -195,14 +210,14 @@ class PickerApp:
         self.min_circle = self._slider(panel, "Min circle area (px, magnets are smaller)", 5000, 250000, 1000,
                                        pipeline.min_circle_area,
                                        lambda v: setattr(pipeline, "min_circle_area", int(float(v))))
-        self.delay = self._slider(panel, "Pick all: seconds between picks", 5, 90, 1, PICK_ALL_DELAY_S, None)
+        self.delay = self._slider(panel, "Queue: seconds between picks", 5, 90, 1, PICK_ALL_DELAY_S, None)
 
         # Status
-        tk.Label(panel, text="Status", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        tk.Label(panel, text="Status", font=("", 12, "bold")).pack(anchor="w", pady=(10, 0))
         self.status = tk.Label(panel, justify="left", anchor="w", font=("", 10), width=34)
         self.status.pack(anchor="w")
         self.last_command = tk.Label(panel, justify="left", anchor="w", font=("Courier", 9), width=40,
-                                     wraplength=290, fg="#444")
+                                     wraplength=260, fg="#444")
         self.last_command.pack(anchor="w", pady=(6, 0))
 
         root.protocol("WM_DELETE_WINDOW", self.quit)
@@ -226,56 +241,107 @@ class PickerApp:
 
     def on_mode_change(self):
         colour_mode = self.mode.get() == "colour"
-        state = "normal" if colour_mode else "disabled"
         for b in self.colour_buttons.values():
-            b.config(state=state)
-        self.pick_all_button.config(state=state if self.colour else "disabled")
+            b.config(state="normal" if colour_mode else "disabled")
         if not colour_mode:
             self.colour = None
-            self.stop()
-        self.update_colour_buttons()
+            self.clear()
+        self.update_buttons()
 
     def select_colour(self, colour: str):
+        if colour != self.colour:
+            self.clear()                            # ny färg = ny kö, så inga bitar av den gamla färgen skickas
         self.colour = colour
-        self.stop()                                 # byt färg = avbryt en "Pick all" som pågår
-        print(f"\n[COLOUR] Now picking: {colour}")
-        self.pick_all_button.config(state="normal", text=f"Pick all {colour}")
-        self.update_colour_buttons()
+        print(f"\n[COLOUR] Now showing: {colour}")
+        self.update_buttons()
 
-    def update_colour_buttons(self):
+    def update_buttons(self):
         for c, b in self.colour_buttons.items():
             b.config(relief="sunken" if c == self.colour else "raised",
                      text=f"[{c.capitalize()}]" if c == self.colour else c.capitalize())
-        if self.colour is None:
-            self.pick_all_button.config(text="Pick all (choose a colour)")
+        ready = self.mode.get() == "colour" and self.colour is not None
+        for b in self.queue_controls:
+            b.config(state="normal" if ready else "disabled")
+        self.queue_button.config(text=f"Queue all {self.colour}" if ready else "Queue all (choose a colour)")
+        self.start_button.config(relief="sunken" if self.running else "raised")
+
+    # ── Kön ───────────────────────────────────────────────────────────────────
+    def refresh_list(self):
+        self.queue_list.delete(0, "end")
+        for i, s in enumerate(self.queue):
+            self.queue_list.insert("end", f"{i + 1}. {s.shape:<8} X{s.x_mm:7.1f} Y{s.y_mm:7.1f} RZ{s.rz_deg:+6.1f}")
+        if self.queue:
+            self.queue_list.itemconfig(0, bg="#fde68a")          # gul = nästa bit
+        self.update_buttons()
+
+    def queue_all(self):
+        # Spara alla synliga bitar (= vald färg) med sina positioner. Bitarna ligger still, så positionerna gäller.
+        self.queue = [s for s in self.shapes if self.visible(s)]
+        self.running = False
+        print(f"\n[QUEUE] {len(self.queue)} {self.colour} saved: " + ", ".join(s.shape for s in self.queue))
+        self.refresh_list()
+
+    def start(self):
+        if self.queue:
+            self.running = True
+            print(f"\n[QUEUE] Started, {len(self.queue)} to pick")
+        self.update_buttons()
+
+    def stop(self):
+        if self.running:
+            print(f"\n[QUEUE] Paused, {len(self.queue)} left in the queue")
+        self.running = False
+        self.update_buttons()
+
+    def clear(self):
+        if self.queue:
+            print(f"\n[QUEUE] Cleared, {len(self.queue)} not sent")
+        self.queue, self.running = [], False
+        self.refresh_list()
+
+    def jump(self, s: DetectedShape):
+        """Flyttar biten först i kön och startar kön. Den skickas så fort pausen efter förra biten har gått."""
+        if s in self.queue:
+            self.queue.remove(s)
+        self.queue.insert(0, s)
+        self.running = True
+        wait = max(0.0, self.next_pick_time - time.time())
+        print(f"\n[QUEUE] {s.colour} {s.shape} jumps the queue" + (f", sent in {wait:.0f} s" if wait else ", sent now"))
+        self.refresh_list()
+
+    def pick_now(self):
+        sel = self.queue_list.curselection()
+        if sel:
+            self.jump(self.queue[sel[0]])
 
     # ── Plocka ────────────────────────────────────────────────────────────────
-    def send(self, s: DetectedShape, source: str):
+    def send(self, s: DetectedShape, source: str) -> bool:
+        # Utan ArUco-markör är X/Y pixlar och RZ = 0: skicka aldrig det till roboten
+        if not s.has_mm or self.pipeline.homography_matrix is None:
+            print(f"\n[{source}] NOT SENT: no ArUco marker, {s.colour} {s.shape} has no mm position")
+            self.last_command.config(text="NOT SENT: no ArUco marker found", fg="#dc2626")
+            return False
         report_selection(s, source, self.pipeline)
         cmd = s.to_robot_command()
         robot_command_queue.put(cmd)
-        self.last_command.config(text=f"Sent: {cmd.strip()}")
+        self.last_command.config(text="Sent: " + cmd.strip().replace(";", "; "), fg="#444")
         self.highlight = (s.bbox, s.shape, time.time() + 1.5)
+        return True
 
     def on_click(self, event):
         x, y = event.x / self.scale, event.y / self.scale         # fönsterpixlar -> kamerapixlar
         for s in self.shapes:
             bx, by, bw, bh = s.bbox
-            if bx <= x <= bx + bw and by <= y <= by + bh:
-                self.send(s, "USER CLICK")
-                return
-
-    def pick_all(self):
-        # Alla synliga bitar (= vald färg) i den här framen. Bitarna ligger still, så positionerna gäller.
-        self.pending = [s for s in self.shapes if self.visible(s)]
-        self.next_pick_time = 0.0
-        print(f"\n[PICK ALL] {len(self.pending)} {self.colour} to pick: "
-              + ", ".join(f"{s.colour} {s.shape}" for s in self.pending))
-
-    def stop(self):
-        if self.pending:
-            print(f"\n[PICK ALL] Stopped, {len(self.pending)} not sent")
-        self.pending = []
+            if not (bx <= x <= bx + bw and by <= y <= by + bh):
+                continue
+            if self.mode.get() == "free":
+                self.send(s, "USER CLICK")                         # free pick: skicka direkt
+            elif self.colour is not None:
+                # Colour pick: klickad bit först i kön (samma bit om den redan är sparad, annars läggs den till)
+                queued = min(self.queue, key=lambda q: np.hypot(q.cx_px - s.cx_px, q.cy_px - s.cy_px), default=None)
+                near = queued is not None and np.hypot(queued.cx_px - s.cx_px, queued.cy_px - s.cy_px) < max(bw, bh) / 2
+                self.jump(queued if near else s)
+            return
 
     # ── En frame ──────────────────────────────────────────────────────────────
     def tick(self):
@@ -300,13 +366,24 @@ class PickerApp:
             all_shapes = list(latest_shapes)
         self.shapes = [s for s in all_shapes if self.visible(s)]   # andra färger: ingen kontur, går inte att klicka
 
-        # "Pick all": skicka nästa bit när pausen har gått
-        if self.pending and now >= self.next_pick_time:
-            s = self.pending.pop(0)
-            self.send(s, f"PICK ALL ({len(self.pending)} left)")
+        # Kön: skicka nästa bit när pausen efter förra har gått
+        if self.running and self.queue and now >= self.next_pick_time:
+            if not self.send(self.queue[0], f"QUEUE ({len(self.queue) - 1} left)"):
+                self.stop()                         # ingen markör: pausa, biten ligger kvar först i kön
+                return
+            self.queue.pop(0)
             self.next_pick_time = now + float(self.delay.get())
+            if not self.queue:
+                self.running = False
+                print("\n[QUEUE] Done")
+            self.refresh_list()
 
         display = self.pipeline.draw_hud(frame, self.shapes)
+        for i, s in enumerate(self.queue):                          # könummer på varje sparad bit
+            p = (int(s.cx_px) - 30, int(s.cy_px) + 70)
+            cv2.putText(display, f"#{i + 1}", p, cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 0, 0), 10, cv2.LINE_AA)
+            cv2.putText(display, f"#{i + 1}", p, cv2.FONT_HERSHEY_SIMPLEX, 2.0,
+                        (0, 215, 255) if i == 0 else (255, 255, 255), 4, cv2.LINE_AA)
         if self.highlight and now < self.highlight[2]:
             (bx, by, bw, bh), shape, _ = self.highlight
             cv2.rectangle(display, (bx, by), (bx + bw, by + bh), (0, 215, 255), 6)
@@ -320,12 +397,19 @@ class PickerApp:
         self.video.config(image=self.photo)
 
         counts = {c: sum(s.colour == c for s in all_shapes) for c in COLOURS}
+        if not self.queue:
+            queue_text = "empty"
+        elif self.running:
+            wait = max(0.0, self.next_pick_time - now)
+            queue_text = f"{len(self.queue)} left, next in {wait:.0f} s" if wait else f"{len(self.queue)} left, sending"
+        else:
+            queue_text = f"{len(self.queue)} saved, paused (Start)"
         self.status.config(text=(
             f"Robot:   {'CONNECTED' if self.robot_link.connected else 'waiting...'}\n"
             f"Camera:  {'live' if self.live_camera else 'test image'}\n"
             f"Marker:  {'found' if self.pipeline.homography_matrix is not None else 'NOT FOUND'}\n"
             f"In view: {counts['red']} red, {counts['green']} green, {counts['blue']} blue\n"
-            + (f"Pick all: {len(self.pending)} left" if self.pending else "Pick all: idle")))
+            f"Queue:   {queue_text}"))
 
     def quit(self):
         stop_event.set()
@@ -369,7 +453,7 @@ def main():
     # 4. Tkinter-fönstret (main thread)
     root = tk.Tk()
     PickerApp(root, pipeline, robot_link, live_camera, static_frame)
-    print("\nSYSTEM RUNNING (4 threads). Free pick: click a piece. Colour pick: choose a colour, then click or Pick all.")
+    print("\nSYSTEM RUNNING (4 threads). Free pick: click a piece. Colour pick: choose a colour, Queue all, Start; click a piece or Pick now to jump the queue.")
     root.mainloop()
 
 

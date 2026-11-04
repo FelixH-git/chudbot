@@ -91,6 +91,7 @@ class DetectedShape:
     contour_px: Optional[np.ndarray] = None   # konturen i pixlar i hela bilden (för ghost)
     colour: str = "unknown"                   # bitens färg (red / green / blue), från colour-headen
     colour_confidence: float = 0.0            # hur säker colour-headen är (0..1)
+    has_mm: bool = False                      # False = ingen ArUco-markör: X/Y är pixlar och RZ = 0, får inte skickas
 
     def to_robot_command(self) -> str:
         """Texten som RAPID-koden på roboten läser från socketen."""
@@ -413,6 +414,7 @@ class VisionPipeline:
             contour_px=contour_px,
             colour=colour,
             colour_confidence=round(colour_conf, 2),
+            has_mm=self.homography_matrix is not None,
         )
 
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:
