@@ -1,7 +1,7 @@
 # Author Nils Wikström niwi0007
 
 """
-main_v2.py - vision och robotstyrning med 4 threads:
+main.py - vision och robotstyrning med 4 threads. Starta med:  python main.py
   1. AI-thread: kör nätverket (4 heads: class, rotation, centre, colour) på bilder från kameran.
   2. Koordinat-thread: räknar om pixlar till mm på bordet.
   3. Server-thread: skickar pick-kommandon till ABB-roboten via TCP-socket.
@@ -26,8 +26,8 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from camera import BaslerCamera
-from socketConnection import RobotLink
-from vision_v2 import DetectedShape, VisionPipeline
+from robot_link import RobotLink
+from vision import DetectedShape, VisionPipeline
 
 # KÖER OCH DATA SOM DELAS MELLAN THREADS
 frame_snapshot_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -422,7 +422,7 @@ class PickerApp:
 # THREAD 4: GUI (main thread)
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(script_dir, "neural_net", "models", "crpnet.onnx")
+    model_path = os.path.join(script_dir, "models", "crpnet.onnx")
     image_path = os.path.join(script_dir, "test.png")
 
     # 1. Starta vision pipeline och robot-länken
@@ -446,15 +446,22 @@ def main():
         return
 
     # 3. Starta threads 1, 2 och 3 i bakgrunden
-    for target, args in ((thread_ai_inference, (pipeline,)), (thread_coord_translation, (pipeline,)),
-                         (thread_robot_server, (robot_link,))):
-        threading.Thread(target=target, args=args, daemon=True).start()
+    workers = [threading.Thread(target=thread_ai_inference, args=(pipeline,), daemon=True),
+               threading.Thread(target=thread_coord_translation, args=(pipeline,), daemon=True)]
+    for t in workers:
+        t.start()
+    threading.Thread(target=thread_robot_server, args=(robot_link,), daemon=True).start()
 
     # 4. Tkinter-fönstret (main thread)
     root = tk.Tk()
     PickerApp(root, pipeline, robot_link, live_camera, static_frame)
     print("\nSYSTEM RUNNING (4 threads). Free pick: click a piece. Colour pick: choose a colour, Queue all, Start; click a piece or Pick now to jump the queue.")
     root.mainloop()
+
+    # Vänta tills AI- och koordinat-threaden har slutat, annars kan programmet krascha när det stängs
+    # mitt i en körning av modellen. (Server-threaden kan vänta på roboten för evigt, den väntar vi inte på.)
+    for t in workers:
+        t.join(timeout=3)
 
 
 if __name__ == "__main__":

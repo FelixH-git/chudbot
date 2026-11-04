@@ -68,7 +68,7 @@ def colour_name(roi_bgr: np.ndarray, mask: np.ndarray) -> Tuple[str, float]:
 COLOURS = ["red", "green", "blue"]
 
 # Modellen som tränas och exporteras av neural_net/train.py
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neural_net", "models", "crpnet.onnx")
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "crpnet.onnx")
 
 
 def wrap_period(deg: float, period: float) -> float:

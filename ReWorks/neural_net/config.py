@@ -31,7 +31,7 @@ NORM_STD = (0.229, 0.224, 0.225)      # R, G, B
 PACKAGE_DIR = Path(__file__).parent
 MODELS_DIR = PACKAGE_DIR / "models"
 WEIGHTS_PATH = MODELS_DIR / "crpnet.pth"     # PyTorch-weights (training)
-ONNX_PATH = MODELS_DIR / "crpnet.onnx"       # exporterad modell (roboten)
+ONNX_PATH = PACKAGE_DIR.parent.parent / "main" / "models" / "crpnet.onnx"   # exporterad modell, direkt där robot-programmet (main/) läser den
 
 DATASET_CANDIDATES = [
     Path(r"C:/Users/Nils/Downloads/dataset/dataset"),             # Windows PC

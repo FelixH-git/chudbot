@@ -103,6 +103,7 @@ def final_check(model, crops):
 def export_onnx(model):
     """Sparar modellen som ONNX, det roboten använder (behöver inte PyTorch)."""
     model.eval().cpu()
+    ONNX_PATH.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         model, torch.randn(1, 3, IMG_SIZE, IMG_SIZE), str(ONNX_PATH),
         input_names=["input"], output_names=["class_logits", "rotation_sincos", "centre", "colour_logits"],
