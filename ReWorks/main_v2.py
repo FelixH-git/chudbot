@@ -2,10 +2,13 @@
 
 """
 main_v2.py - vision och robotstyrning med 4 threads:
-  1. AI-thread: kör nätverket (3 heads) på bilder från kameran.
+  1. AI-thread: kör nätverket (4 heads: class, rotation, centre, colour) på bilder från kameran.
   2. Koordinat-thread: räknar om pixlar till mm på bordet.
   3. Server-thread: skickar pick-kommandon till ABB-roboten via TCP-socket.
-  4. GUI (main thread): visar kameran live med HUD, klicka på en form för att plocka den.
+  4. GUI (main thread, Tkinter): kameran live med HUD och knappar.
+     - Free pick: klicka på valfri bit för att plocka den.
+     - Colour pick: välj en färg med knapparna; bara bitar i den färgen visas och kan plockas,
+       "Pick all" plockar alla, en i taget.
   För våran variant så måste OK knapp tryckas på med
 """
 
@@ -15,8 +18,11 @@ import threading
 import time
 from typing import List, Optional
 
+import tkinter as tk
+
 import cv2
 import numpy as np
+from PIL import Image, ImageTk
 
 from camera import BaslerCamera
 from socketConnection import RobotLink
@@ -29,9 +35,6 @@ robot_command_queue: queue.Queue = queue.Queue()
 
 shapes_lock = threading.Lock()
 latest_shapes: List[DetectedShape] = []
-
-selected_shape_lock = threading.Lock()
-selected_shape_info: Optional[dict] = None  # formen som ska lysa guld i GUI:t efter ett klick
 
 stop_event = threading.Event()
 
@@ -119,65 +122,223 @@ def thread_robot_server(robot_link: RobotLink):
     print("[Thread 3: Server Communication] Stopped.")
 
 
-# Vilken färg som får plockas. None = alla. Byts med sifferknapparna i GUI:t.
-pick_colour: Optional[str] = None
-COLOUR_KEYS = {ord("0"): None, ord("1"): "red", ord("2"): "green", ord("3"): "blue"}
-
-
-def colour_ok(s: DetectedShape) -> bool:
-    """True om formen har den färg som får plockas just nu."""
-    return pick_colour is None or s.colour == pick_colour
-
-
-# [A] plockar ALLA bitar av vald färg, en i taget. Roboten svarar inte när den är klar,
-# så vi väntar så här länge mellan kommandona (en pick tar ungefär så lång tid). Justera på plats.
+# "Pick all" plockar alla bitar av vald färg, en i taget. Roboten svarar inte när den är klar,
+# så vi väntar så här länge mellan kommandona (en pick tar ungefär så lång tid). Kan ändras i GUI:t.
 PICK_ALL_DELAY_S = 30.0
+
+COLOURS = ["red", "green", "blue"]                                  # samma ordning som colour-headen
+BUTTON_COLOURS = {"red": "#dc2626", "green": "#16a34a", "blue": "#2563eb"}
+DISPLAY_SIZE = (1000, 820)                                          # kamerabilden får högst vara så här stor i fönstret (px)
 
 
 def report_selection(s: DetectedShape, source: str, pipeline: VisionPipeline) -> None:
     """Skriver ut den valda formen och kommandot som skickas, och alla candidates igen nästa frame."""
-    print(f"\n[{source}] Selected {s.colour} (hue {s.hue:.0f}) {s.shape} ({s.confidence*100:.0f}%) at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
+    print(f"\n[{source}] Selected {s.colour} ({s.colour_confidence*100:.0f}%) {s.shape} ({s.confidence*100:.0f}%) "
+          f"at X={s.x_mm} mm, Y={s.y_mm} mm, RZ={s.rz_deg} deg")
     print(f"[{source}] Command: {s.to_robot_command().strip()}")
     pipeline.log_next_frame()
 
 
-# MUSKLICK (klicka för att plocka). param = vision pipeline (ges i setMouseCallback)
-def on_mouse_click(event, mouse_x, mouse_y, flags, param):
-    """Anropas av OpenCV när man klickar i videofönstret."""
-    global selected_shape_info
+class PickerApp:
+    """Tkinter-fönstret: kamerabilden till vänster, knappar och inställningar till höger."""
 
-    if event == cv2.EVENT_LBUTTONDOWN:
-        with shapes_lock:
-            current_shapes = list(latest_shapes)
+    def __init__(self, root, pipeline, robot_link, live_camera, static_frame):
+        self.root = root
+        self.pipeline = pipeline
+        self.robot_link = robot_link
+        self.live_camera = live_camera
+        self.static_frame = static_frame
 
-        for s in current_shapes:
+        self.mode = tk.StringVar(value="free")      # "free" eller "colour"
+        self.colour: Optional[str] = None           # vald färg i colour-läget
+        self.pending: List[DetectedShape] = []      # bitar som "Pick all" ska plocka, en i taget
+        self.next_pick_time = 0.0
+        self.highlight: Optional[tuple] = None      # (bbox, shape, när den slutar lysa)
+        self.shapes: List[DetectedShape] = []       # det som visas just nu
+        self.scale = 1.0                            # fönsterpixlar per kamerapixel
+        self.last_snapshot = 0.0
+        self.photo = None                           # Tkinter måste ha kvar en referens till bilden
+
+        root.title("ABB Robot Vision & Picking Control")
+        self.video = tk.Label(root, bg="black", cursor="hand2")
+        self.video.grid(row=0, column=0, padx=6, pady=6)
+        self.video.bind("<Button-1>", self.on_click)
+        panel = tk.Frame(root, padx=10, pady=6)
+        panel.grid(row=0, column=1, sticky="n")
+
+        # Läge
+        tk.Label(panel, text="Mode", font=("", 12, "bold")).pack(anchor="w")
+        for value, text in (("free", "Free pick (click any piece)"), ("colour", "Colour pick")):
+            tk.Radiobutton(panel, text=text, variable=self.mode, value=value,
+                           command=self.on_mode_change).pack(anchor="w")
+
+        # Färgknappar
+        tk.Label(panel, text="Colour", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        row = tk.Frame(panel); row.pack(anchor="w")
+        self.colour_buttons = {}
+        for c in COLOURS:
+            b = tk.Button(row, text=c.capitalize(), width=7, bg=BUTTON_COLOURS[c], fg="white",
+                          activebackground=BUTTON_COLOURS[c], command=lambda c=c: self.select_colour(c))
+            b.pack(side="left", padx=2)
+            self.colour_buttons[c] = b
+        self.pick_all_button = tk.Button(panel, text="Pick all", width=24, command=self.pick_all)
+        self.pick_all_button.pack(anchor="w", pady=(6, 2))
+        self.stop_button = tk.Button(panel, text="Stop", width=24, command=self.stop)
+        self.stop_button.pack(anchor="w")
+
+        # Inställningar som beror på uppställningen
+        tk.Label(panel, text="Settings", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        self.min_area = self._slider(panel, "Min piece area (px)", 5000, 250000, 1000, pipeline.min_area,
+                                     lambda v: setattr(pipeline, "min_area", int(float(v))))
+        self.max_area = self._slider(panel, "Max piece area (px)", 5000, 250000, 1000, pipeline.max_area,
+                                     lambda v: setattr(pipeline, "max_area", int(float(v))))
+        self.min_circle = self._slider(panel, "Min circle area (px, magnets are smaller)", 5000, 250000, 1000,
+                                       pipeline.min_circle_area,
+                                       lambda v: setattr(pipeline, "min_circle_area", int(float(v))))
+        self.delay = self._slider(panel, "Pick all: seconds between picks", 5, 90, 1, PICK_ALL_DELAY_S, None)
+
+        # Status
+        tk.Label(panel, text="Status", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        self.status = tk.Label(panel, justify="left", anchor="w", font=("", 10), width=34)
+        self.status.pack(anchor="w")
+        self.last_command = tk.Label(panel, justify="left", anchor="w", font=("Courier", 9), width=40,
+                                     wraplength=290, fg="#444")
+        self.last_command.pack(anchor="w", pady=(6, 0))
+
+        root.protocol("WM_DELETE_WINDOW", self.quit)
+        root.bind("<Escape>", lambda e: self.quit())
+        self.on_mode_change()
+        self.tick()
+
+    @staticmethod
+    def _slider(parent, text, lo, hi, step, value, command):
+        tk.Label(parent, text=text).pack(anchor="w")
+        scale = tk.Scale(parent, from_=lo, to=hi, resolution=step, orient="horizontal", length=260,
+                         command=command)
+        scale.set(value)
+        scale.pack(anchor="w")
+        return scale
+
+    # ── Vad som syns och får plockas ──────────────────────────────────────────
+    def visible(self, s: DetectedShape) -> bool:
+        """Free pick: alla. Colour pick: bara vald färg (alla tills en färg är vald)."""
+        return self.mode.get() == "free" or self.colour is None or s.colour == self.colour
+
+    def on_mode_change(self):
+        colour_mode = self.mode.get() == "colour"
+        state = "normal" if colour_mode else "disabled"
+        for b in self.colour_buttons.values():
+            b.config(state=state)
+        self.pick_all_button.config(state=state if self.colour else "disabled")
+        if not colour_mode:
+            self.colour = None
+            self.stop()
+        self.update_colour_buttons()
+
+    def select_colour(self, colour: str):
+        self.colour = colour
+        self.stop()                                 # byt färg = avbryt en "Pick all" som pågår
+        print(f"\n[COLOUR] Now picking: {colour}")
+        self.pick_all_button.config(state="normal", text=f"Pick all {colour}")
+        self.update_colour_buttons()
+
+    def update_colour_buttons(self):
+        for c, b in self.colour_buttons.items():
+            b.config(relief="sunken" if c == self.colour else "raised",
+                     text=f"[{c.capitalize()}]" if c == self.colour else c.capitalize())
+        if self.colour is None:
+            self.pick_all_button.config(text="Pick all (choose a colour)")
+
+    # ── Plocka ────────────────────────────────────────────────────────────────
+    def send(self, s: DetectedShape, source: str):
+        report_selection(s, source, self.pipeline)
+        cmd = s.to_robot_command()
+        robot_command_queue.put(cmd)
+        self.last_command.config(text=f"Sent: {cmd.strip()}")
+        self.highlight = (s.bbox, s.shape, time.time() + 1.5)
+
+    def on_click(self, event):
+        x, y = event.x / self.scale, event.y / self.scale         # fönsterpixlar -> kamerapixlar
+        for s in self.shapes:
             bx, by, bw, bh = s.bbox
-            # Klickade man inuti den här formens bounding box?
-            if bx <= mouse_x <= (bx + bw) and by <= mouse_y <= (by + bh):
-                if not colour_ok(s):
-                    print(f"\n[USER CLICK] {s.colour} {s.shape} ignored: only picking {pick_colour}")
-                    break
-                report_selection(s, "USER CLICK", param)
-                cmd = s.to_robot_command()
-                robot_command_queue.put(cmd)
+            if bx <= x <= bx + bw and by <= y <= by + bh:
+                self.send(s, "USER CLICK")
+                return
 
-                with selected_shape_lock:
-                    selected_shape_info = {
-                        "shape": s.shape,
-                        "bbox": s.bbox,
-                        "expire_time": time.time() + 1.5,  # lys i 1.5 s
-                    }
-                break
+    def pick_all(self):
+        # Alla synliga bitar (= vald färg) i den här framen. Bitarna ligger still, så positionerna gäller.
+        self.pending = [s for s in self.shapes if self.visible(s)]
+        self.next_pick_time = 0.0
+        print(f"\n[PICK ALL] {len(self.pending)} {self.colour} to pick: "
+              + ", ".join(f"{s.colour} {s.shape}" for s in self.pending))
+
+    def stop(self):
+        if self.pending:
+            print(f"\n[PICK ALL] Stopped, {len(self.pending)} not sent")
+        self.pending = []
+
+    # ── En frame ──────────────────────────────────────────────────────────────
+    def tick(self):
+        if stop_event.is_set():
+            return
+        if self.live_camera is not None and self.live_camera.isOpen:
+            frame = self.live_camera.grabFrame()
+        else:
+            frame = self.static_frame.copy()
+        if frame is not None:
+            self.show(frame)
+        self.root.after(15, self.tick)
+
+    def show(self, frame):
+        # Var 200:e ms: skicka en bild till AI-threaden
+        now = time.time()
+        if now - self.last_snapshot > 0.2 and frame_snapshot_queue.empty():
+            frame_snapshot_queue.put(frame.copy())
+            self.last_snapshot = now
+
+        with shapes_lock:
+            all_shapes = list(latest_shapes)
+        self.shapes = [s for s in all_shapes if self.visible(s)]   # andra färger: ingen kontur, går inte att klicka
+
+        # "Pick all": skicka nästa bit när pausen har gått
+        if self.pending and now >= self.next_pick_time:
+            s = self.pending.pop(0)
+            self.send(s, f"PICK ALL ({len(self.pending)} left)")
+            self.next_pick_time = now + float(self.delay.get())
+
+        display = self.pipeline.draw_hud(frame, self.shapes)
+        if self.highlight and now < self.highlight[2]:
+            (bx, by, bw, bh), shape, _ = self.highlight
+            cv2.rectangle(display, (bx, by), (bx + bw, by + bh), (0, 215, 255), 6)
+            cv2.putText(display, f">> SENDING {shape.upper()} TO ROBOT <<", (bx, max(40, by - 25)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 215, 255), 3, cv2.LINE_AA)
+
+        # Till Tkinter: krymp, BGR -> RGB, PhotoImage
+        self.scale = min(DISPLAY_SIZE[0] / display.shape[1], DISPLAY_SIZE[1] / display.shape[0])
+        small = cv2.resize(display, None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_AREA)
+        self.photo = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(small, cv2.COLOR_BGR2RGB)))
+        self.video.config(image=self.photo)
+
+        counts = {c: sum(s.colour == c for s in all_shapes) for c in COLOURS}
+        self.status.config(text=(
+            f"Robot:   {'CONNECTED' if self.robot_link.connected else 'waiting...'}\n"
+            f"Camera:  {'live' if self.live_camera else 'test image'}\n"
+            f"Marker:  {'found' if self.pipeline.homography_matrix is not None else 'NOT FOUND'}\n"
+            f"In view: {counts['red']} red, {counts['green']} green, {counts['blue']} blue\n"
+            + (f"Pick all: {len(self.pending)} left" if self.pending else "Pick all: idle")))
+
+    def quit(self):
+        stop_event.set()
+        if self.live_camera is not None:
+            self.live_camera.close()
+        self.root.destroy()
+        print("Application shut down cleanly.")
 
 
 # THREAD 4: GUI (main thread)
 def main():
-    global selected_shape_info, pick_colour
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "neural_net", "models", "crpnet.onnx")
-    if not os.path.exists(model_path):
-        model_path = os.path.join(script_dir, "shape_3head_v2.onnx")
-
     image_path = os.path.join(script_dir, "test.png")
 
     # 1. Starta vision pipeline och robot-länken
@@ -195,159 +356,21 @@ def main():
         print(f"[CAMERA] Basler camera not detected ({e}). Using '{image_path}' as simulated feed.")
         live_camera = None
 
-    # Ladda test-bilden
     static_frame = cv2.imread(image_path)
     if static_frame is None and live_camera is None:
         print(f"Error: Neither Basler camera nor '{image_path}' could be opened!")
         return
 
     # 3. Starta threads 1, 2 och 3 i bakgrunden
-    t1 = threading.Thread(target=thread_ai_inference, args=(pipeline,), daemon=True)
-    t2 = threading.Thread(target=thread_coord_translation, args=(pipeline,), daemon=True)
-    t3 = threading.Thread(target=thread_robot_server, args=(robot_link,), daemon=True)
+    for target, args in ((thread_ai_inference, (pipeline,)), (thread_coord_translation, (pipeline,)),
+                         (thread_robot_server, (robot_link,))):
+        threading.Thread(target=target, args=args, daemon=True).start()
 
-    t1.start()
-    t2.start()
-    t3.start()
-
-    # 4. Skapa OpenCV-fönstret
-    window_name = "ABB Robot Vision & Picking Control"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, 1240, 720)
-    cv2.setMouseCallback(window_name, on_mouse_click, pipeline)
-
-    print("\n=========================================================")
-    print(" SYSTEM RUNNING (4 Threads Active)")
-    print(" - CLICK on any shape on the screen to pick it!")
-    print(" - HOTKEYS: [S]tar, [T]riangle, [C]ircle, [H]exagon")
-    print(" - COLOUR: [0] all, [1] red, [2] green, [3] blue")
-    print(f" - [A] pick ALL pieces of the chosen colour ({PICK_ALL_DELAY_S:.0f} s apart), [X] stop")
-    print(" - Press [Q] to exit.")
-    print("=========================================================\n")
-
-    last_snapshot_time = 0.0
-    pick_all_pending: List[DetectedShape] = []   # bitar som [A] ska plocka, en i taget
-    next_pick_time = 0.0
-
-    try:
-        while not stop_event.is_set():
-            # Hämta senaste framen (kameran eller test-bilden)
-            if live_camera is not None and live_camera.isOpen:
-                frame = live_camera.grabFrame()
-                if frame is None:
-                    continue
-            else:
-                frame = static_frame.copy()
-                time.sleep(0.03)  # ca 30 FPS när test-bilden används
-
-            # Var 200:e ms: skicka en bild till AI-threaden
-            current_time = time.time()
-            if current_time - last_snapshot_time > 0.2:
-                if frame_snapshot_queue.empty():
-                    frame_snapshot_queue.put(frame.copy())
-                last_snapshot_time = current_time
-
-            # Hämta de senaste formerna från thread 2 (med lock)
-            with shapes_lock:
-                current_shapes = list(latest_shapes)
-
-            # [A]: skicka nästa bit när pausen har gått
-            if pick_all_pending and time.time() >= next_pick_time:
-                s = pick_all_pending.pop(0)
-                report_selection(s, f"PICK ALL ({len(pick_all_pending)} left)", pipeline)
-                robot_command_queue.put(s.to_robot_command())
-                with selected_shape_lock:
-                    selected_shape_info = {"shape": s.shape, "bbox": s.bbox, "expire_time": time.time() + 1.5}
-                next_pick_time = time.time() + PICK_ALL_DELAY_S
-
-            # Rita HUD
-            display_frame = pipeline.draw_hud(frame, current_shapes)
-
-            # Guldram runt formen man klickade på
-            with selected_shape_lock:
-                if selected_shape_info and time.time() < selected_shape_info["expire_time"]:
-                    bx, by, bw, bh = selected_shape_info["bbox"]
-                    cv2.rectangle(display_frame, (bx, by), (bx + bw, by + bh), (0, 215, 255), 4)
-                    cv2.putText(
-                        display_frame,
-                        f">> SENDING {selected_shape_info['shape'].upper()} TO ROBOT <<",
-                        (bx, max(30, by - 20)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 215, 255),
-                        2,
-                        cv2.LINE_AA,
-                    )
-                elif selected_shape_info and time.time() >= selected_shape_info["expire_time"]:
-                    selected_shape_info = None
-
-            # Statusrad överst i fönstret
-            status_text = (
-                f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
-                f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
-                f"COLOUR: {(pick_colour or 'ALL').upper()} [0-3] | "
-                + (f"PICK ALL: {len(pick_all_pending)} LEFT [X] STOP" if pick_all_pending
-                   else "CLICK SHAPE, [S/T/C/H] OR [A] = PICK ALL")
-            )
-            banner_color = (0, 180, 0) if robot_link.connected else (0, 120, 255)
-            cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], 45), (30, 30, 30), -1)
-            cv2.putText(
-                display_frame,
-                status_text,
-                (20, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                banner_color,
-                2,
-                cv2.LINE_AA,
-            )
-
-            cv2.imshow(window_name, display_frame)
-
-            # Tangenter
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q") or key == 27:  # 'q' eller ESC
-                break
-            elif key in COLOUR_KEYS:
-                pick_colour = COLOUR_KEYS[key]
-                print(f"\n[COLOUR] Now picking: {pick_colour or 'all colours'}")
-                # Byt färg = avbryt en [A]-körning som pågår, så inga bitar av den gamla färgen skickas
-                if pick_all_pending:
-                    print(f"[PICK ALL] Stopped, {len(pick_all_pending)} of the old colour not sent")
-                    pick_all_pending = []
-            elif key == ord("a"):
-                # Alla bitar av vald färg i den här framen. Bitarna ligger still, så positionerna gäller.
-                pick_all_pending = [s for s in current_shapes if colour_ok(s)]
-                next_pick_time = 0.0
-                print(f"\n[PICK ALL] {len(pick_all_pending)} {pick_colour or 'pieces'} to pick: "
-                      + ", ".join(f"{s.colour} {s.shape}" for s in pick_all_pending))
-            elif key == ord("x"):
-                if pick_all_pending:
-                    print(f"\n[PICK ALL] Stopped, {len(pick_all_pending)} not sent")
-                pick_all_pending = []
-            elif key in (ord("s"), ord("t"), ord("c"), ord("h")):
-                key_map = {ord("s"): "Star", ord("t"): "Triangle", ord("c"): "Circle", ord("h"): "Hexagon"}
-                target_shape_name = key_map[key]
-
-                # Hitta första formen av den sorten och skicka den
-                for s in current_shapes:
-                    if s.shape.lower() == target_shape_name.lower() and colour_ok(s):
-                        report_selection(s, "HOTKEY", pipeline)
-                        robot_command_queue.put(s.to_robot_command())
-                        with selected_shape_lock:
-                            selected_shape_info = {
-                                "shape": s.shape,
-                                "bbox": s.bbox,
-                                "expire_time": time.time() + 1.5,
-                            }
-                        break
-
-    finally:
-        stop_event.set()
-        if live_camera is not None:
-            live_camera.close()
-        cv2.destroyAllWindows()
-        print("Application shut down cleanly.")
+    # 4. Tkinter-fönstret (main thread)
+    root = tk.Tk()
+    PickerApp(root, pipeline, robot_link, live_camera, static_frame)
+    print("\nSYSTEM RUNNING (4 threads). Free pick: click a piece. Colour pick: choose a colour, then click or Pick all.")
+    root.mainloop()
 
 
 if __name__ == "__main__":

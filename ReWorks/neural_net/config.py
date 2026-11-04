@@ -4,6 +4,9 @@ from pathlib import Path
 # Formerna, i samma ordning som nätverkets outputs. Ändra INTE ordningen .
 CLASSES = ["Circle", "Hexagon", "Square", "Star", "Triangle"]
 
+# Färgerna, i samma ordning som colour-headens outputs. Orange räknas som röd.
+COLOURS = ["red", "green", "blue"]
+
 # Efter så här många grader ser formen likadan ut igen. Cirklar har ingen rotation.
 SYMMETRY_DEG = {"Hexagon": 60, "Square": 90, "Star": 72, "Triangle": 120}
 

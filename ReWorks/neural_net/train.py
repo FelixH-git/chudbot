@@ -4,14 +4,14 @@ import numpy as np
 import torch
 from torch import nn
 
-from .config import CLASSES, IMG_SIZE, MODELS_DIR, ONNX_PATH, SYMMETRY_DEG, WEIGHTS_PATH
+from .config import CLASSES, COLOURS, IMG_SIZE, MODELS_DIR, ONNX_PATH, SYMMETRY_DEG, WEIGHTS_PATH
 from .dataset import make_loaders
 from .labels import load_crops, wrap
 from .model import CRPNet
 from .preprocess import square_canvas, to_input
 
 EPOCHS = 60
-W_ROTATION, W_CENTRE = 2.0, 10.0     # hur mycket rotation och centre väger jämfört med class
+W_ROTATION, W_CENTRE, W_COLOUR = 2.0, 10.0, 1.0     # hur mycket rotation, centre och colour väger jämfört med class
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # k per form (cirkel = 1 så vi aldrig delar med 0)
@@ -23,9 +23,9 @@ def rotation_pair(rotation_out, cls):
     return rotation_out[torch.arange(len(cls)), cls]
 
 
-def compute_losses(outputs, cls, centre, rotation, has_rotation):
+def compute_losses(outputs, cls, centre, rotation, has_rotation, colour):
     """En loss per head. Lägre = bättre."""
-    class_out, rotation_out, centre_out = outputs
+    class_out, rotation_out, centre_out, colour_out = outputs
 
     # Head 1: cross entropy, straffar låg sannolikhet för rätt form
     class_loss = nn.functional.cross_entropy(class_out, cls)
@@ -38,19 +38,23 @@ def compute_losses(outputs, cls, centre, rotation, has_rotation):
     # Head 3: avståndet mellan gissad och rätt centre
     centre_loss = nn.functional.smooth_l1_loss(centre_out, centre, beta=0.02)
 
-    return class_loss, rotation_loss, centre_loss
+    # Head 4: cross entropy, som class
+    colour_loss = nn.functional.cross_entropy(colour_out, colour)
+
+    return class_loss, rotation_loss, centre_loss, colour_loss
 
 
 @torch.no_grad()
 def evaluate(model, loader):
-    """Rätt class (andel), centre-fel (pixlar i 128-bilden) och rotation-fel (grader) per form."""
+    """Rätt class och colour (andel), centre-fel (pixlar i 128-bilden) och rotation-fel (grader) per form."""
     model.eval()
-    correct, total, centre_errors, rot_errors, rot_classes = 0, 0, [], [], []
-    for x, cls, centre, rotation, has_rotation in loader:
+    correct, colour_correct, total, centre_errors, rot_errors, rot_classes = 0, 0, 0, [], [], []
+    for x, cls, centre, rotation, has_rotation, colour in loader:
         x, cls, centre, rotation = x.to(DEVICE), cls.to(DEVICE), centre.to(DEVICE), rotation.to(DEVICE)
-        class_out, rotation_out, centre_out = model(x)
+        class_out, rotation_out, centre_out, colour_out = model(x)
 
         correct += (class_out.argmax(dim=1) == cls).sum().item()
+        colour_correct += (colour_out.argmax(dim=1).cpu() == colour).sum().item()
         total += len(cls)
         centre_errors.append(((centre_out - centre).norm(dim=1) * IMG_SIZE).cpu())
 
@@ -65,6 +69,7 @@ def evaluate(model, loader):
     rot_errors, rot_classes = torch.cat(rot_errors), torch.cat(rot_classes)
     return {
         "class": correct / total,
+        "colour": colour_correct / total,
         "centre_px": torch.cat(centre_errors).mean().item(),
         "rotation": {s: rot_errors[rot_classes == CLASSES.index(s)].mean().item() for s in SYMMETRY_DEG},
     }
@@ -72,14 +77,15 @@ def evaluate(model, loader):
 
 @torch.no_grad()
 def final_check(model, crops):
-    """Samma kontroll som i notebooken: ovridna crops, centre i crop-pixlar, rotation mot regeln."""
+    """Samma kontroll som i notebooken: ovridna crops (riktiga färger), centre i crop-pixlar, rotation mot regeln."""
     model.eval()
-    correct, centre_errors, rot_errors = 0, [], {s: [] for s in SYMMETRY_DEG}
+    correct, colour_correct, centre_errors, rot_errors = 0, 0, [], {s: [] for s in SYMMETRY_DEG}
     for _, row in crops.iterrows():
         canvas, (x0, y0, side) = square_canvas(cv2.imread(row["path"]))
-        class_out, rotation_out, centre_out = model(torch.from_numpy(to_input(canvas))[None].to(DEVICE))
+        class_out, rotation_out, centre_out, colour_out = model(torch.from_numpy(to_input(canvas))[None].to(DEVICE))
         shape = CLASSES[class_out.argmax().item()]
         correct += shape == row["shape"]
+        colour_correct += COLOURS[colour_out.argmax().item()] == row["colour"]
         cx, cy = centre_out[0].tolist()
         centre_errors.append(np.hypot(cx * side - x0 - row["cx"], cy * side - y0 - row["cy"]))
         if row["shape"] in SYMMETRY_DEG:
@@ -87,10 +93,11 @@ def final_check(model, crops):
             s, c = rotation_out[0, CLASSES.index(row["shape"])].tolist()
             angle = np.degrees(np.arctan2(s, c)) / k
             rot_errors[row["shape"]].append(abs(wrap(angle - row["angle"], SYMMETRY_DEG[row["shape"]])))
-    print(f"class:    {correct}/{len(crops)} rätt")
-    print(f"centre:   {np.mean(centre_errors):.1f} px fel i snitt (crop-pixlar)")
+    print(f"class:    {correct}/{len(crops)} correct")
+    print(f"colour:   {colour_correct}/{len(crops)} correct")
+    print(f"centre:   {np.mean(centre_errors):.1f} px mean error (crop pixels)")
     for s, e in rot_errors.items():
-        print(f"rotation: {s:<9} {np.mean(e):.2f}° fel i snitt")
+        print(f"rotation: {s:<9} {np.mean(e):.2f}° mean error")
 
 
 def export_onnx(model):
@@ -98,54 +105,77 @@ def export_onnx(model):
     model.eval().cpu()
     torch.onnx.export(
         model, torch.randn(1, 3, IMG_SIZE, IMG_SIZE), str(ONNX_PATH),
-        input_names=["input"], output_names=["class_logits", "rotation_sincos", "centre"],
+        input_names=["input"], output_names=["class_logits", "rotation_sincos", "centre", "colour_logits"],
         dynamic_axes={"input": {0: "batch"}}, opset_version=17,
     )
-    print(f"sparade {ONNX_PATH}")
+    print(f"saved {ONNX_PATH}")
 
 
-def main():
+def train(train_loader, val_loader, epochs=EPOCHS, on_epoch=None):
+    """
+    Tränar CRPNet och sparar den bästa epoch:en i WEIGHTS_PATH. Returnerar (modell, history).
+    history = en dict per epoch med loss per head (training) och resultat på validation.
+    on_epoch(history) anropas efter varje epoch (notebooken ritar grafer där).
+    """
     torch.manual_seed(0)
     MODELS_DIR.mkdir(exist_ok=True)
-
-    crops = load_crops()
-    train_loader, val_loader = make_loaders(crops)
-    print(f"{len(train_loader.dataset.crops)} crops training, {len(val_loader.dataset.crops)} validation, {DEVICE}")
-
     model = CRPNet().to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)   # learning rate sjunker mjukt mot 0
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)   # learning rate sjunker mjukt mot 0
 
-    best = float("inf")
-    for epoch in range(1, EPOCHS + 1):
+    best, history = float("inf"), []
+    for epoch in range(1, epochs + 1):
         model.train()
-        for x, cls, centre, rotation, has_rotation in train_loader:
+        sums, batches = np.zeros(5), 0          # loss totalt + per head, medel över epoch:en
+        for x, cls, centre, rotation, has_rotation, colour in train_loader:
             x, cls, centre = x.to(DEVICE), cls.to(DEVICE), centre.to(DEVICE)
-            rotation, has_rotation = rotation.to(DEVICE), has_rotation.to(DEVICE)
+            rotation, has_rotation, colour = rotation.to(DEVICE), has_rotation.to(DEVICE), colour.to(DEVICE)
 
-            class_loss, rotation_loss, centre_loss = compute_losses(model(x), cls, centre, rotation, has_rotation)
-            loss = class_loss + W_ROTATION * rotation_loss + W_CENTRE * centre_loss
+            class_loss, rotation_loss, centre_loss, colour_loss = compute_losses(
+                model(x), cls, centre, rotation, has_rotation, colour)
+            loss = class_loss + W_ROTATION * rotation_loss + W_CENTRE * centre_loss + W_COLOUR * colour_loss
 
             optimizer.zero_grad()      # nollställ gamla gradients
             loss.backward()            # backpropagation: hur varje weight påverkar lossen
             optimizer.step()           # optimizer: ändra alla weights lite åt rätt håll
+            sums += [loss.item(), class_loss.item(), rotation_loss.item(), centre_loss.item(), colour_loss.item()]
+            batches += 1
+        lr = scheduler.get_last_lr()[0]
         scheduler.step()
 
-        # Ett enda tal för "hur bra": rotation-fel + centre-fel + 1 per procent fel class. Spara den bästa
+        # Ett enda tal för "hur bra": rotation-fel + centre-fel + 1 per procent fel class / colour. Spara den bästa
         result = evaluate(model, val_loader)
         rotation_error = np.mean(list(result["rotation"].values()))
-        score = rotation_error + result["centre_px"] + 100 * (1 - result["class"])
-        saved = ""
-        if score < best:
+        score = rotation_error + result["centre_px"] + 100 * (1 - result["class"]) + 100 * (1 - result["colour"])
+        saved = score < best
+        if saved:
             best = score
             torch.save(model.state_dict(), WEIGHTS_PATH)
-            saved = "(sparad)"
-        print(f"epoch {epoch:2d} | class {result['class']:.0%} | centre {result['centre_px']:4.2f} px | "
-              f"rotation {rotation_error:4.2f}° {saved}")
+        loss_mean = sums / batches
+        history.append({
+            "epoch": epoch, "lr": lr, "saved": saved, "score": score,
+            "loss": loss_mean[0], "class_loss": loss_mean[1], "rotation_loss": loss_mean[2],
+            "centre_loss": loss_mean[3], "colour_loss": loss_mean[4],
+            "val_class": result["class"], "val_colour": result["colour"], "val_centre_px": result["centre_px"],
+            "val_rotation": rotation_error, **{f"val_rot_{s}": e for s, e in result["rotation"].items()},
+        })
+        print(f"epoch {epoch:2d} | class {result['class']:.0%} | colour {result['colour']:.0%} | centre {result['centre_px']:4.2f} px | "
+              f"rotation {rotation_error:4.2f}° {'(saved)' if saved else ''}")
+        if on_epoch is not None:
+            on_epoch(history)
+
+    model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=DEVICE))     # tillbaka till den bästa epoch:en
+    return model, history
+
+
+def main():
+    crops = load_crops()
+    train_loader, val_loader = make_loaders(crops)
+    print(f"{len(train_loader.dataset.crops)} crops training, {len(val_loader.dataset.crops)} validation, {DEVICE}")
+    model, _ = train(train_loader, val_loader)
 
     # Bästa modellen: slutkontroll på validation-crops, sedan export
-    model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=DEVICE))
-    print("\nSlutkontroll (validation):")
+    print("\nFinal check (validation):")
     final_check(model, val_loader.dataset.crops)
     export_onnx(model)
 

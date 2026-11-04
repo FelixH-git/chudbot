@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from .config import CLASSES, SYMMETRY_DEG, dataset_root
+from .config import CLASSES, COLOURS, SYMMETRY_DEG, dataset_root
 
 
 def wrap(angle, symmetry_deg):
@@ -48,8 +48,18 @@ def rule_angle(mask, shape):
     return wrap(np.degrees(np.angle(z)) / k + extra, SYMMETRY_DEG[shape]), abs(z) / weights.sum()
 
 
+def colour_label(hue):
+    """Färg-label från bitens hue (OpenCV 0..179): den färgkanal som är starkast.
+    Röd (och orange) är starkast i båda ändarna, grön runt 60, blå runt 120."""
+    if 30 <= hue < 90:
+        return "green"
+    if 90 <= hue < 150:
+        return "blue"
+    return "red"
+
+
 def load_crops():
-    """Alla användbara crops med labels: class, centre (pixlar i cropen) och rotation-vinkel."""
+    """Alla användbara crops med labels: class, colour, centre (pixlar i cropen) och rotation-vinkel."""
     root = dataset_root()
     rows = []
     for _, r in pd.read_csv(root / "labels.csv").iterrows():
@@ -64,20 +74,22 @@ def load_crops():
             continue
         ys, xs = np.nonzero(mask)                # koordinaterna för bitens pixlar
         angle, fit = rule_angle(mask, shape) if shape in SYMMETRY_DEG else (0.0, 1.0)   # cirkel: ingen rotation
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         rows.append({
             "path": str(root / r["object_masked_path"]),
             "shape": shape,
+            "colour": colour_label(float(np.median(hsv[..., 0][mask]))),   # label för colour-headen
             "cx": xs.mean() + 0.5,               # centre = medel av pixlarna (+0.5 = mitten av pixeln)
             "cy": ys.mean() + 0.5,
             "angle": angle,
             "fit": fit,
             "area": mask.sum(),
-            "colour": cv2.cvtColor(img, cv2.COLOR_BGR2HSV)[..., 1][mask].mean(),   # mättnad: papper är gråaktigt
+            "saturation": hsv[..., 1][mask].mean(),   # mättnad: papper är gråaktigt
             "cut_off": mask[0].any() or mask[-1].any() or mask[:, 0].any() or mask[:, -1].any(),   # rör kanten?
         })
     crops = pd.DataFrame(rows)
 
     # Släng dåliga crops: grå (papper), fel storlek (kluster / fel bit), avklippta, eller formen passar inte
     size = crops["area"] / crops.groupby("shape")["area"].transform("median")
-    good = (crops["colour"] > 120) & size.between(0.6, 1.5) & ~crops["cut_off"] & (crops["fit"] > 0.8)
+    good = (crops["saturation"] > 120) & size.between(0.6, 1.5) & ~crops["cut_off"] & (crops["fit"] > 0.8)
     return crops[good].reset_index(drop=True)

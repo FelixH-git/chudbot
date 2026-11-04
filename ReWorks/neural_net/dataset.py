@@ -5,18 +5,23 @@ import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 
-from .config import CLASSES, SYMMETRY_DEG
+from .config import CLASSES, COLOURS, SYMMETRY_DEG
 from .preprocess import square_canvas, to_input
+
+
+# OpenCV-bilder är BGR: kanal 0 = blå, 1 = grön, 2 = röd
+BGR_COLOURS = ["blue", "green", "red"]
 
 
 class CRPDataset(Dataset):
     """
-    Ger (bild, class, centre, rotation, har_rotation) för varje exempel.
+    Ger (bild, class, centre, rotation, har_rotation, colour) för varje exempel.
       bild:         (3, 128, 128)
       class:        index i CLASSES
       centre:       (cx, cy) som 0..1 av kvadraten
       rotation:     [sin(k*vinkel), cos(k*vinkel)]
       har_rotation: 1, eller 0 för cirklar (då räknas rotationen inte i training)
+      colour:       index i COLOURS
     """
 
     def __init__(self, crops, train, copies=4):
@@ -50,8 +55,15 @@ class CRPDataset(Dataset):
 
         if self.train:
             img = np.clip(img * rng.uniform(0.75, 1.25), 0, 255).astype(np.uint8)   # ljusstyrka
-            if rng.random() < 0.5:
-                img = img[..., rng.permutation(3)].copy()                          # byt färgkanaler
+
+        # Byt färgkanaler slumpmässigt (alla 6 ordningar), både i training och validation.
+        # I datasetet hör färg och form ihop (alla stjärnor blå, alla kvadrater röda); bytet gör att
+        # varje form syns i varje färg, så colour-headen lär sig färg och inte "stjärna = blå".
+        # Färg-labeln följer med: den starkaste kanalen flyttar dit bytet skickar den.
+        perm = rng.permutation(3)
+        img = img[..., perm].copy()
+        strongest = BGR_COLOURS.index(row["colour"])            # kanalen som var starkast före bytet
+        colour = BGR_COLOURS[int(np.where(perm == strongest)[0][0])]
 
         if row["shape"] in SYMMETRY_DEG:
             k = 360 // SYMMETRY_DEG[row["shape"]]
@@ -66,6 +78,7 @@ class CRPDataset(Dataset):
             torch.tensor([cx / side, cy / side], dtype=torch.float32),
             torch.tensor(rotation, dtype=torch.float32),
             torch.tensor(has_rotation, dtype=torch.float32),
+            COLOURS.index(colour),
         )
 
 

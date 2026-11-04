@@ -44,7 +44,8 @@ CANVAS_MARGIN = 0.15   # svart kant runt cropen innan resize (samma som i traini
 # Skriv ut candidates högst en gång per så här många sekunder (annars fylls terminalen)
 LOG_INTERVAL_S = 10.0
 
-# Färg på biten, från medianen av hue (HSV, OpenCV 0..179) för bitens pixlar. Ingen AI, ingen omträning.
+# Färg på biten. Normalt kommer den från modellens colour-head (head 4). Den här hue-regeln används bara
+# som reserv om en gammal modell utan colour-head laddas: medianen av hue (HSV, OpenCV 0..179).
 # (namn, hue från, hue till). Röd (och orange) ligger i båda ändarna av hue-cirkeln.
 # Bara färgerna vi plockar; allt annat (t.ex. gula magneter) blir "unknown" och plockas aldrig i färgläge.
 # Blå går upp till 150: i annat ljus kan blått bli lite lila. Hue syns i etiketten (h=...) så gränserna kan justeras på plats.
@@ -62,6 +63,9 @@ def colour_name(roi_bgr: np.ndarray, mask: np.ndarray) -> Tuple[str, float]:
         if lo <= h < hi:
             return name, h
     return "unknown", h
+
+# Färgerna i colour-headens ordning (samma som neural_net/config.py)
+COLOURS = ["red", "green", "blue"]
 
 # Modellen som tränas och exporteras av neural_net/train.py
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neural_net", "models", "crpnet.onnx")
@@ -85,8 +89,8 @@ class DetectedShape:
     bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
     theta_img_deg: float = 0.0        # bitens vinkel i bilden (för att rita)
     contour_px: Optional[np.ndarray] = None   # konturen i pixlar i hela bilden (för ghost)
-    colour: str = "unknown"                   # bitens färg, se colour_name
-    hue: float = -1.0                         # uppmätt hue (0..179), för att justera COLOUR_RANGES
+    colour: str = "unknown"                   # bitens färg (red / green / blue), från colour-headen
+    colour_confidence: float = 0.0            # hur säker colour-headen är (0..1)
 
     def to_robot_command(self) -> str:
         """Texten som RAPID-koden på roboten läser från socketen."""
@@ -117,6 +121,10 @@ class VisionPipeline:
         self.target_shapes = target_shapes or ["Hexagon", "Triangle", "Circle", "Square", "Star"]
         self.homography_matrix: Optional[np.ndarray] = None
         self.pad_frac = pad_frac
+        # Storleksgränser för en bit (pixlar). Beror på kamerans höjd, kan ändras live från GUI:t.
+        self.min_area = 43000
+        self.max_area = 120000
+        self.min_circle_area = MIN_CIRCLE_AREA   # magnet-filtret, beror också på kamerans höjd
         self._last_log = 0.0        # när candidates senast skrevs ut
         self._log_frame = True      # ska den här framens candidates skrivas ut?
 
@@ -146,6 +154,10 @@ class VisionPipeline:
 
         # Rotation-outputen ska vara ett [sin kθ, cos kθ]-par per class -> formen (1, 5, 2)
         angle_shape = self.session.get_outputs()[1].shape
+        # 4 outputs = modell med colour-head. Annars används hue-regeln som reserv.
+        self.has_colour_head = len(self.session.get_outputs()) >= 4
+        if not self.has_colour_head:
+            print(f"[VISION] {model_path} has no colour head: using the hue rule for colour")
         if len(angle_shape) != 3:
             raise ValueError(
                 f"{model_path} is an old (v1) model. Export crpnet.onnx with neural_net/train.py."
@@ -222,14 +234,16 @@ class VisionPipeline:
     def extract_rois(
         self,
         frame_bgr: np.ndarray,
-        min_area: int = 43000,
-        max_area: int = 120000,
+        min_area: Optional[int] = None,
+        max_area: Optional[int] = None,
     ) -> List[Tuple[Tuple[int, int, int, int], np.ndarray]]:
         """
         Gör bakgrunden svart med en HSV-färgmask (som i datasetet), tar bort saker vid kanterna
         (balkar / robotarm) och klipper ut en crop per form med 25 % padding.
         """
         h_img, w_img = frame_bgr.shape[:2]
+        min_area = self.min_area if min_area is None else min_area
+        max_area = self.max_area if max_area is None else max_area
 
         # Bestäm en gång per frame om candidates ska skrivas ut (högst var LOG_INTERVAL_S sekund)
         now = time.monotonic()
@@ -308,7 +322,7 @@ class VisionPipeline:
     def infer_roi(
         self, bbox: Tuple[int, int, int, int], roi_bgr: np.ndarray, min_confidence: float = 0.85
     ) -> Optional[DetectedShape]:
-        """Kör nätverket (3 heads) på en crop och gör om svaret till en DetectedShape."""
+        """Kör nätverket (4 heads) på en crop och gör om svaret till en DetectedShape."""
         x, y, w, h = bbox
 
         tensor, (x0, y0, side) = self._preprocess(roi_bgr)
@@ -348,7 +362,7 @@ class VisionPipeline:
 
         # Filter 5: en för liten "Circle" är en magnet, inte en bit
         if shape_name == "Circle" and (contour_px is None or cv2.contourArea(
-                contour_px.astype(np.int32)) < MIN_CIRCLE_AREA):
+                contour_px.astype(np.int32)) < self.min_circle_area):
             return None
 
         if CENTER_SOURCE == "cv2":
@@ -377,7 +391,15 @@ class VisionPipeline:
         else:
             rz = self.robot_rz(shape_name, self.image_angle_to_marker_deg(cx_px, cy_px, theta_img))
 
-        colour, hue = colour_name(roi_bgr, piece_mask)
+        # Head 4: colour (softmax -> sannolikheter). Gammal modell utan colour-head: hue-regeln
+        if self.has_colour_head:
+            c_logits = outputs[3][0]
+            c_prob = np.exp(c_logits - np.max(c_logits))
+            c_prob /= c_prob.sum()
+            colour, colour_conf = COLOURS[int(np.argmax(c_prob))], float(np.max(c_prob))
+        else:
+            colour, _ = colour_name(roi_bgr, piece_mask)
+            colour_conf = 1.0 if colour != "unknown" else 0.0
         return DetectedShape(
             shape=shape_name,
             x_mm=coords_mm[0],
@@ -390,7 +412,7 @@ class VisionPipeline:
             theta_img_deg=theta_img,
             contour_px=contour_px,
             colour=colour,
-            hue=hue,
+            colour_confidence=round(colour_conf, 2),
         )
 
     def process_frame(self, frame_bgr: np.ndarray) -> List[DetectedShape]:
@@ -482,7 +504,7 @@ class VisionPipeline:
                 cv2.arrowedLine(annotated, (cx, cy), (end_x, end_y), (255, 50, 50), 3, tipLength=0.3)
 
             # Textruta med svart bakgrund
-            label = f"{obj.colour}(h{obj.hue:.0f}) {obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg} deg"
+            label = f"{obj.colour} {obj.shape} ({int(obj.confidence*100)}%): X={obj.x_mm}, Y={obj.y_mm}, RZ={obj.rz_deg} deg"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
 
             badge_y1 = max(0, y - th - 12)

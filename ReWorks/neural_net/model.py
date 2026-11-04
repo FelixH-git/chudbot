@@ -1,8 +1,8 @@
-"""CRPNet: ett nätverk med tre heads. Class, rotation och centre från en och samma bild."""
+"""CRPNet: ett nätverk med fyra heads. Class, rotation, centre och colour från en och samma bild."""
 from torch import nn
 from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
 
-from .config import CLASSES, IMG_SIZE
+from .config import CLASSES, COLOURS, IMG_SIZE
 
 
 class CRPNet(nn.Module):
@@ -11,6 +11,7 @@ class CRPNet(nn.Module):
     Ut:  class    (batch, 5)     poäng per form, störst = gissningen
          rotation (batch, 5, 2)  ett [sin(k*vinkel), cos(k*vinkel)]-par per form, använd raden för formen
          centre   (batch, 2)     (cx, cy) som 0..1 av bilden
+         colour   (batch, 3)     poäng per färg (red, green, blue), störst = gissningen
     """
 
     def __init__(self, pretrained=True):
@@ -48,10 +49,18 @@ class CRPNet(nn.Module):
             nn.Linear(64, 2), nn.Sigmoid(),
         )
 
+        # Head 4, colour: som class, VAR biten ligger spelar ingen roll, så medelvärde över griden räcker
+        self.colour_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1), nn.Flatten(),
+            nn.Linear(576, 64), nn.Hardswish(),
+            nn.Linear(64, len(COLOURS)),
+        )
+
     def forward(self, x):
         features = self.backbone(x)              # (batch, 576, 4, 4)
         spatial = self.spatial(features)         # (batch, 64*4*4)
         classes = self.class_head(features)
         rotation = self.rotation_head(spatial).view(-1, len(CLASSES), 2)
         centre = self.centre_head(spatial)
-        return classes, rotation, centre
+        colour = self.colour_head(features)
+        return classes, rotation, centre, colour
