@@ -88,7 +88,12 @@ class DetectedShape:
 
     def to_robot_command(self) -> str:
         """Texten som RAPID-koden på roboten läser från socketen."""
-        return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={self.rz_deg:.1f};END\r\n"
+        sym = VisionPipeline.SYMMETRY.get(self.shape, 360.0)
+        # Tecknet negeras (-self.rz_deg) eftersom sugkoppens Z-axel (tsuck) pekar nedåt
+        # mot bordet (RelTool -100 lyfter uppåt), vilket kastar om rotationsriktningen
+        # (medurs/moturs) relativt trayens koordinatsystem.
+        rz = wrap_period(-self.rz_deg, sym)
+        return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={rz:.1f};END\r\n"
 
     def toRobortCommand(self) -> str:
         return self.to_robot_command()
