@@ -33,7 +33,7 @@ MARKER_TO_ROBOT_ROT_DEG = 90.0
 
 # Minsta area (px) för en Circle. Magneterna ser ut som cirklar men är hälften så stora
 # (magnet ca 32 000-45 000 px, riktig cirkel ca 88 000 px). Gäller kamerans nuvarande höjd.
-MIN_CIRCLE_AREA = 70000
+MIN_CIRCLE_AREA = 15000
 
 # Var X/Y kommer ifrån: "ai" = head 3 i nätverket, "cv2" = mitten av formens mask
 CENTER_SOURCE = "ai"
@@ -220,7 +220,7 @@ class VisionPipeline:
     def extract_rois(
         self,
         frame_bgr: np.ndarray,
-        min_area: int = 43000,
+        min_area: int = 10000,
         max_area: int = 120000,
     ) -> List[Tuple[Tuple[int, int, int, int], np.ndarray]]:
         """

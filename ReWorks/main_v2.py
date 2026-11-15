@@ -10,6 +10,8 @@ main_v2.py - vision och robotstyrning med 4 threads:
 """
 
 import os
+os.environ["GDK_BACKEND"] = "x11"
+os.environ["QT_QPA_PLATFORM"] = "xcb"
 import queue
 import threading
 import time
@@ -34,18 +36,21 @@ selected_shape_lock = threading.Lock()
 selected_shape_info: Optional[dict] = None  # formen som ska lysa guld i GUI:t efter ett klick
 
 stop_event = threading.Event()
+latest_inference_time_ms: float = 0.0
 
 
 # THREAD 1: AI (kör nätverket)
 def thread_ai_inference(pipeline: VisionPipeline):
     """Hämtar bilder från kön hela tiden och kör ONNX-modellen på dem."""
     print("[Thread 1: AI Inference] Started.")
+    global latest_inference_time_ms
     while not stop_event.is_set():
         try:
             frame = frame_snapshot_queue.get(timeout=0.2)
         except queue.Empty:
             continue
 
+        t_start = time.perf_counter()
         # Klipp ut en crop per form (HSV-mask, svart bakgrund)
         rois = pipeline.extract_rois(frame)
 
@@ -55,6 +60,9 @@ def thread_ai_inference(pipeline: VisionPipeline):
             det = pipeline.infer_roi(bbox, roi)
             if det is not None:
                 raw_detections.append(det)
+
+        latest_inference_time_ms = (time.perf_counter() - t_start) * 1000.0
+        print(f"[AI Inference] Time: {latest_inference_time_ms:.1f} ms | Detected {len(raw_detections)} shapes")
 
         # Skicka vidare till koordinat-threaden
         if not coord_translation_queue.full():
@@ -212,8 +220,11 @@ def main():
 
     # 4. Skapa OpenCV-fönstret
     window_name = "ABB Robot Vision & Picking Control"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, 1240, 720)
+    cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+    cv2.startWindowThread()
+
+
+
     cv2.setMouseCallback(window_name, on_mouse_click, pipeline)
 
     print("\n=========================================================")
@@ -284,6 +295,7 @@ def main():
             # Statusrad överst i fönstret
             status_text = (
                 f"ROBOT: {'CONNECTED' if robot_link.connected else 'WAITING'} | "
+                f"INFERENCE: {latest_inference_time_ms:.1f} ms | "
                 f"MODE: {'LIVE CAMERA' if live_camera else 'TEST IMAGE'} | "
                 f"COLOUR: {(pick_colour or 'ALL').upper()} [0-3] | "
                 + (f"PICK ALL: {len(pick_all_pending)} LEFT [X] STOP" if pick_all_pending

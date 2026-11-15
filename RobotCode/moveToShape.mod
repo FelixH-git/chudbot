@@ -1,40 +1,74 @@
 MODULE moveToShape
-    PROC move_to_shape(string shape_input)
+    PROC move_to_shape(string shape_input, num rz_val)
+            VAR robtarget current_pos;
+            VAR robtarget pDest;
+            VAR robtarget pDestApp;
+            VAR orient held_orient;
+
             waitforOK("");
-            MoveL phome, v100, fine, tsuck\WObj:=wobj1;
-            MoveL shape, v100 , fine, tsuck\WObj:=wobjAruco;
+            MoveJ phome, v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! 1. Safe Approach: Hover 100mm directly above the shape (neutral wrist)
+            MoveL RelTool(shape, 0, 0, -100), v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! 2. Go down to pick (neutral wrist)
+            MoveL shape, v50 , fine, tsuck\WObj:=wobjAruco;
             suckOn;
-            WaitTime(1);
+            WaitTime 1.0;
+            
+            ! 3. Safe Depart: Lift straight back up 100mm along the tool's Z-axis
+            MoveL RelTool(shape, 0, 0, -100), v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! 4. Rotate the piece in the air AFTER picking up!
+            MoveL RelTool(shape, 0, 0, -100 \Rz:=rz_val), v100, fine, tsuck\WObj:=wobjAruco;
+            
+            ! 5. Freeze this exact rotation so the wrist DOES NOT rotate on the way to the tray!
+            current_pos := CRobT(\Tool:=tsuck \WObj:=wobjAiPlaceTray);
+            held_orient := current_pos.rot;
+            
+            ! Disable configuration checking so the robot takes the smooth path without twisting Axis 6
+            ConfJ \Off;
+            ConfL \Off;
+
+            ! Move to tray approach keeping the EXACT rotation
+            pDestApp := pApporach;
+            pDestApp.rot := held_orient;
+            MoveJ pDestApp, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+
+            ! Select the target slot
+            IF shape_input = "Star" THEN
+                pDest := pStar;
+            ELSEIF shape_input = "Square" THEN
+                pDest := pSquare;
+            ELSEIF shape_input = "Hexagon" THEN
+                pDest := pHexagon;
+            ELSEIF shape_input = "Circle" THEN
+                pDest := pCircle;
+            ELSEIF shape_input = "Triangle" THEN
+                pDest := pTriangle;
+            ELSE
+                TPWrite "Unknown shape: " + shape_input;
+                ConfJ \On;
+                ConfL \On;
+                RETURN;
+            ENDIF
+
+            ! Apply the exact rotation from the air to the tray slot
+            pDest.rot := held_orient;
+
+            ! Place into slot maintaining the rotation
+            MoveL RelTool(pDest, 0, 0, -30), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+            MoveL pDest, v50 , fine, tsuck\WObj:=wobjAiPlaceTray;
+            WaitTime 1.0;
+            suckOff;
+            MoveL RelTool(pDest, 0, 0, -30), v100, fine, tsuck\WObj:=wobjAiPlaceTray;
+            
+            ! Restore configuration checking
+            ConfJ \On;
+            ConfL \On;
+
+            ! Move back to safe approach over tray
             MoveL pApporach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-
-
-            !movers
-            IF shape_input = "pstar" THEN
-                MoveL pStar, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime(1);
-                suckOff;
-            ENDIF
-            IF shape_input = "psquare" THEN
-                MoveL pSquare, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime(1);
-                suckOff;
-            ENDIF
-            IF shape_input = "phexa" THEN
-                MoveL pHexagon, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime(1);
-                suckOff;
-            ENDIF
-            IF shape_input = "pcircle" THEN
-                MoveL pCircle, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime(1);
-                suckOff;
-            ENDIF
-            IF shape_input = "ptriangle" THEN
-                MoveL pTriangle, v100 , fine, tsuck\WObj:=wobjAiPlaceTray;
-                WaitTime(1);
-                suckOff;
-            ENDIF
-            MoveL pApporach, v100, fine, tsuck\WObj:=wobjAiPlaceTray;
-
-        ENDPROC
+    ENDPROC
+    
 ENDMODULE
