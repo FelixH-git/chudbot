@@ -106,6 +106,12 @@ class PickerApp:
                                      wraplength=260, fg="#444")
         self.last_command.pack(anchor="w", pady=(6, 0))
 
+        # Quit-knapp
+        self.quit_button = tk.Button(panel, text="Quit Application", font=("", 10, "bold"),
+                                     bg="#ef4444", fg="white", activebackground="#dc2626", activeforeground="white",
+                                     width=28, command=self.quit)
+        self.quit_button.pack(anchor="w", pady=(14, 0))
+
         root.protocol("WM_DELETE_WINDOW", self.quit)
         root.bind("<Escape>", lambda e: self.quit())
         self.on_mode_change()
@@ -269,5 +275,6 @@ class PickerApp:
     def quit(self):
         self.stop_event.set()
         self.source.close()
+        self.robot_link.close()
         self.root.destroy()
         print("Application shut down cleanly.")
