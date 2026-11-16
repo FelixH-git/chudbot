@@ -33,7 +33,7 @@ MARKER_TO_ROBOT_ROT_DEG = 90.0
 
 # Minsta area (px) för en Circle. Magneterna ser ut som cirklar men är hälften så stora
 # (magnet ca 32 000-45 000 px, riktig cirkel ca 88 000 px). Gäller kamerans nuvarande höjd.
-MIN_CIRCLE_AREA = 70000
+MIN_CIRCLE_AREA = 15000
 
 # Var X/Y kommer ifrån: "ai" = head 3 i nätverket, "cv2" = mitten av formens mask
 CENTER_SOURCE = "ai"
@@ -95,7 +95,12 @@ class DetectedShape:
 
     def to_robot_command(self) -> str:
         """Texten som RAPID-koden på roboten läser från socketen."""
-        return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={self.rz_deg:.1f};END\r\n"
+        sym = VisionPipeline.SYMMETRY.get(self.shape, 360.0)
+        # Tecknet negeras (-self.rz_deg) eftersom sugkoppens Z-axel (tsuck) pekar nedåt
+        # mot bordet (RelTool -100 lyfter uppåt), vilket kastar om rotationsriktningen
+        # (medurs/moturs) relativt trayens koordinatsystem.
+        rz = wrap_period(-self.rz_deg, sym)
+        return f"SHAPE={self.shape};X={self.x_mm:.1f};Y={self.y_mm:.1f};RZ={rz:.1f};END\r\n"
 
     def toRobortCommand(self) -> str:
         return self.to_robot_command()
@@ -123,7 +128,7 @@ class VisionPipeline:
         self.homography_matrix: Optional[np.ndarray] = None
         self.pad_frac = pad_frac
         # Storleksgränser för en bit (pixlar). Beror på kamerans höjd, kan ändras live från GUI:t.
-        self.min_area = 43000
+        self.min_area = 10000
         self.max_area = 120000
         self.min_circle_area = MIN_CIRCLE_AREA   # magnet-filtret, beror också på kamerans höjd
         self._last_log = 0.0        # när candidates senast skrevs ut

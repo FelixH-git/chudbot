@@ -38,11 +38,13 @@ shapes_lock = threading.Lock()
 latest_shapes: List[DetectedShape] = []
 
 stop_event = threading.Event()
+latest_inference_time_ms: float = 0.0
 
 
 # THREAD 1: AI (kör nätverket)
 def thread_ai_inference(pipeline: VisionPipeline):
     """Hämtar bilder från kön hela tiden och kör ONNX-modellen på dem."""
+    global latest_inference_time_ms
     print("[Thread 1: AI Inference] Started.")
     while not stop_event.is_set():
         try:
@@ -50,6 +52,7 @@ def thread_ai_inference(pipeline: VisionPipeline):
         except queue.Empty:
             continue
 
+        t_start = time.perf_counter()
         # Klipp ut en crop per form (HSV-mask, svart bakgrund)
         rois = pipeline.extract_rois(frame)
 
@@ -59,6 +62,8 @@ def thread_ai_inference(pipeline: VisionPipeline):
             det = pipeline.infer_roi(bbox, roi)
             if det is not None:
                 raw_detections.append(det)
+
+        latest_inference_time_ms = (time.perf_counter() - t_start) * 1000.0
 
         # Skicka vidare till koordinat-threaden
         if not coord_translation_queue.full():
@@ -406,6 +411,7 @@ class PickerApp:
             queue_text = f"{len(self.queue)} saved, paused (Start)"
         self.status.config(text=(
             f"Robot:   {'CONNECTED' if self.robot_link.connected else 'waiting...'}\n"
+            f"Infer:   {latest_inference_time_ms:.1f} ms\n"
             f"Camera:  {'live' if self.live_camera else 'test image'}\n"
             f"Marker:  {'found' if self.pipeline.homography_matrix is not None else 'NOT FOUND'}\n"
             f"In view: {counts['red']} red, {counts['green']} green, {counts['blue']} blue\n"
