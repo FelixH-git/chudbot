@@ -7,6 +7,7 @@ De tre bakgrunds-threadsen. Allt de delar (köer, senaste bitarna, stopp-signale
 """
 import queue
 import threading
+import time
 from typing import List
 
 from detection import DetectedShape
@@ -38,7 +39,10 @@ def ai_worker(pipeline: VisionPipeline, frames: queue.Queue, detections: queue.Q
             frame = frames.get(timeout=0.2)
         except queue.Empty:
             continue
+        t0 = time.perf_counter()
         shapes = pipeline.detect(frame)
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        print(f"[AI Inference] Time: {dt_ms:.1f} ms | Detected {len(shapes)} shapes")
         if not detections.full():
             detections.put((frame, shapes))
     print("[Thread 1: AI Inference] Stopped.")

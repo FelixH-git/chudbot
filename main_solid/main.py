@@ -14,6 +14,9 @@ Här skapas alla delar och kopplas ihop; ingen egen logik. Vad varje fil gör:
   frame_source.py  Basler-kameran eller test.png
   gui.py           Tkinter-fönstret (thread 4)
 """
+import os
+os.environ["GDK_BACKEND"] = "x11"
+os.environ["QT_QPA_PLATFORM"] = "xcb"
 import queue
 import threading
 

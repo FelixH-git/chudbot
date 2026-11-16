@@ -40,7 +40,9 @@ class RobotFrame:
 
 def pick_command(piece: DetectedShape) -> str:
     """Texten som RAPID-koden på roboten läser från socketen."""
-    return f"SHAPE={piece.shape};X={piece.x_mm:.1f};Y={piece.y_mm:.1f};RZ={piece.rz_deg:.1f};END\r\n"
+    sym = {"Circle": 360.0, "Hexagon": 60.0, "Square": 90.0, "Star": 72.0, "Triangle": 120.0}.get(piece.shape, 360.0)
+    rz = wrap_period(-piece.rz_deg, sym)
+    return f"SHAPE={piece.shape};X={piece.x_mm:.1f};Y={piece.y_mm:.1f};RZ={rz:.1f};END\r\n"
 
 
 class RobotLink:
