@@ -1,6 +1,7 @@
 # Python Virtual Environment
 .RobotSocket/
 venv/
+.venv/
 env/
 ENV/
 

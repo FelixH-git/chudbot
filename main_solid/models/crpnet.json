@@ -1,0 +1,38 @@
+{
+  "classes": [
+    "Circle",
+    "Hexagon",
+    "Square",
+    "Star",
+    "Triangle"
+  ],
+  "colours": [
+    "red",
+    "green",
+    "blue"
+  ],
+  "symmetry_deg": {
+    "Hexagon": 60,
+    "Square": 90,
+    "Star": 72,
+    "Triangle": 120
+  },
+  "img_size": 128,
+  "canvas_margin": 0.15,
+  "norm_mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "norm_std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "outputs": [
+    "class_logits",
+    "rotation_sincos",
+    "centre",
+    "colour_logits"
+  ]
+}

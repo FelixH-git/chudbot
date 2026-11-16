@@ -234,7 +234,7 @@ class PickerApp:
         scale.pack(anchor="w")
         return scale
 
-    # ── Vad som syns och får plockas ──────────────────────────────────────────
+    # Vad som syns och får plockas
     def visible(self, s: DetectedShape) -> bool:
         """Free pick: alla. Colour pick: bara vald färg (alla tills en färg är vald)."""
         return self.mode.get() == "free" or self.colour is None or s.colour == self.colour
@@ -265,7 +265,7 @@ class PickerApp:
         self.queue_button.config(text=f"Queue all {self.colour}" if ready else "Queue all (choose a colour)")
         self.start_button.config(relief="sunken" if self.running else "raised")
 
-    # ── Kön ───────────────────────────────────────────────────────────────────
+    # Kön
     def refresh_list(self):
         self.queue_list.delete(0, "end")
         for i, s in enumerate(self.queue):
@@ -314,7 +314,7 @@ class PickerApp:
         if sel:
             self.jump(self.queue[sel[0]])
 
-    # ── Plocka ────────────────────────────────────────────────────────────────
+    # Plocka
     def send(self, s: DetectedShape, source: str) -> bool:
         # Utan ArUco-markör är X/Y pixlar och RZ = 0: skicka aldrig det till roboten
         if not s.has_mm or self.pipeline.homography_matrix is None:
@@ -343,7 +343,7 @@ class PickerApp:
                 self.jump(queued if near else s)
             return
 
-    # ── En frame ──────────────────────────────────────────────────────────────
+    # En frame
     def tick(self):
         if stop_event.is_set():
             return
